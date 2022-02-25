@@ -18,7 +18,7 @@ main = do
 
         sock <- createBindSocket sockpath
 
-        pb <- async $ ansiblePlaybook "../ansible" "pb.yml" "limit" "tag"
+        pb <- async $ ansiblePlaybook "ansible-example" "pb.yml" "limit" "tag"
         as <- async $ readForever sock
 
         ret <- wait pb
