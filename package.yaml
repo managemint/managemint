@@ -1,0 +1,31 @@
+name:                hansible-ansible
+version:             0.1.0.0
+license:             AllRightsReserved
+author:              "Jonas Gunz"
+maintainer:          "himself@jonasgunz.de"
+copyright:           "2022 Jonas Gunz"
+
+c-sources: csrc/*.c
+cc-options:
+  - '-D_PYINCLUDE=<python3.10/Python.h>'
+include-dirs: csrc/
+extra-libraries:
+  - python3.10
+
+dependencies:
+- base >= 4.7 && < 5
+- network
+- async
+- unix
+
+
+executables:
+  hansible-ansible-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies: []
+      #    - hansible-ansible
