@@ -9,8 +9,9 @@ import Data.Time.Clock
 import Data.List (delete)
 
 -- TODO: [ ] If failcount exeeds a certain threshold, block the job
+--     ? [ ] Typesynonym for job where Eq is different: playbook id and time have to match
 
-data Playbook = Playbook {_name :: String}
+data Playbook = Playbook {_name :: String, _playbookId :: Int}
     deriving (Eq)
 
 -- |A Job is an ansbile playbook which should be executed at a certain date with some optionale arguments 
@@ -27,14 +28,8 @@ safeHead (x:xs) = Just x
 safeHead _      = Nothing
 
 insertSort :: Ord a => a -> [a] -> [a]
-insertSort x [] = [x]
-insertSort x xs
-    | x <  m    = insertSort x left ++ right  -- TODO (++) is not very efficient
-    | x >  m    = left ++ insertSort x right
-    | otherwise = left ++ x:right
-    where
-        mid = length xs `div` 2
-        (left,right@(m:_)) = splitAt mid xs
+insertSort x []     = [x]
+insertSort x (y:ys) = if x <= y then x:y:ys else y : insertSort x ys
 
 -- |Merges two jobs and sorts them
 -- |Assumes that the second job list ist sorted
