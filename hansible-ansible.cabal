@@ -26,8 +26,10 @@ executable hansible-ansible-exe
       csrc/
   c-sources:
       csrc/ansible.c
+      csrc/git.c
   extra-libraries:
       python3.10
+      git2
   build-depends:
       async
     , base >=4.7 && <5
