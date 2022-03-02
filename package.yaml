@@ -29,4 +29,5 @@ executables:
     - -with-rtsopts=-N
     dependencies:
       - time
+      - lens
       #    - hansible-ansible
