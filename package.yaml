@@ -17,6 +17,8 @@ dependencies:
 - network
 - async
 - unix
+- json
+- bytestring
 
 
 executables:

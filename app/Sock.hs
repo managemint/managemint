@@ -3,6 +3,10 @@ import Control.Monad (forever)
 
 import Network.Socket
 import Network.Socket.ByteString (recv)
+import Data.ByteString.Internal
+
+readLen :: Int
+readLen = 2048
 
 createBindSocket :: String -> IO Socket
 createBindSocket s = do
@@ -16,3 +20,8 @@ closeSocket = close
 readForever :: Socket -> IO()
 readForever s = forever $ do
         print =<< recv s 2048
+
+readSocket :: Socket -> IO [Char]
+readSocket s = do
+    ret <- recv s 2048
+    return $ unpackChars ret
