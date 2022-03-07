@@ -19,9 +19,9 @@ closeSocket = close
 
 readForever :: Socket -> IO()
 readForever s = forever $ do
-        print =<< recv s 2048
+        print =<< recv s readLen
 
 readSocket :: Socket -> IO [Char]
 readSocket s = do
-    ret <- recv s 2048
+    ret <- recv s readLen
     return $ unpackChars ret

@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 module Executor where
 
 import Ansible
@@ -8,66 +9,102 @@ import Foreign.C.Types
 import Foreign.C.String
 
 import Control.Concurrent.Async
-import Control.Monad (forever)
+import Control.Monad
 
 import System.Posix.Env
+import System.Directory
 
 import Text.JSON
 import Text.JSON.Generic
+
+import Text.Printf
 
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html#t:JSON
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON-Generic.html
 
---data AnsibleRunnerResult = AnsibleRunnerResult
---    { event :: String
---    , playbook :: String
---    , playbook_id :: Int
---    , play :: String
---    , play_id :: Int
---    , task :: String
---    , task_id :: Int
---    , host :: String
---    , is_changed :: Bool
---    , is_skipped :: Bool
---    , is_failed :: Bool
---    , is_unreachable :: Bool
---    , ignore_errors :: Bool
---    , delegate :: Bool
---    , delegate_host :: String
---    , is_item :: Bool
---    , item :: String
---    } deriving (Show, Data)
-
-data AnsibleEvent = AnsibleEvent
-    { event :: String 
+data AnsibleRunnerStart = AnsibleRunnerStart 
+    { playbook :: String
+    , playbook_id :: Int
+    , play :: String
+    , play_id :: Int
+    , task :: String
+    , task_id :: Int
+    , host :: String
     } deriving (Show, Data)
 
-aaa :: String
-aaa = "{\"event\": \"task_runner_result\", \"playbook\": \"pb.yml\", \"playbook_id\": 1, \"play\": \"Test\", \"play_id\": 1, \"task\": \"Test\", \"task_id\": 2, \"host\": \"localhost\", \"is_changed\": false, \"is_skipped\": false, \"is_failed\": false, \"is_unreachable\": false, \"ignore_errors\": false, \"delegate\": false, \"delegate_host\": \"\", \"is_item\": true, \"item\": \"This\"}"
+hostARS :: AnsibleRunnerStart -> String
+hostARS = host
 
-sockpath = "/tmp/socket"
+taskARS :: AnsibleRunnerStart -> String
+taskARS = task
+
+data AnsibleRunnerResult = AnsibleRunnerResult
+    { playbook :: String
+    , playbook_id :: Int
+    , play :: String
+    , play_id :: Int
+    , task :: String
+    , task_id :: Int
+    , host :: String
+    , is_changed :: Bool
+    , is_skipped :: Bool
+    , is_failed :: Bool
+    , is_unreachable :: Bool
+    , ignore_errors :: Bool
+    , delegate :: Bool
+    , delegate_host :: String
+    , is_item :: Bool
+    , item :: String
+    } deriving (Show, Data)
+
+hostARR :: AnsibleRunnerResult -> String
+hostARR = host
+
+taskARR :: AnsibleRunnerResult -> String
+taskARR = task
+
+newtype AnsibleEvent = AnsibleEvent
+    { event :: String
+    } deriving (Show, Data)
+
+-- TODO put in /run
+sockPath = "/tmp/hansible.sock"
+
+notifyDatabase :: AnsibleRunnerResult -> IO ()
+notifyDatabase arr = do
+        printf "Result: %s, F: %s UR: %s SK: %s\n"
+            (taskARR arr) (show $ is_failed arr)
+            (show $ is_unreachable arr) (show $ is_skipped arr)
+
+notifyScheduler :: AnsibleRunnerStart -> IO ()
+notifyScheduler ars = do
+        printf "Start: %s, Host: %s\n"
+            (taskARS ars) (hostARS ars)
+
+processAnsibleEvent :: String -> String -> IO ()
+processAnsibleEvent "task_runner_result" s =
+        notifyDatabase (decodeJSON s :: AnsibleRunnerResult)
+processAnsibleEvent "task_runner_start" s =
+        notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
+processAnsibleEvent e s = return ()
 
 exec :: IO ()
 exec = do
-        putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockpath
+        putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
-        sock <- createBindSocket sockpath
-
+        sock <- createBindSocket sockPath
+        let run = True
         pb <- async $ ansiblePlaybook "ansible-example" "pb.yml" "limit" "tag"
-        -- as <- async $ readForever sock
         as <- async $ forever $ do
-            val <- readSocket sock
-            print( decodeJSON val :: AnsibleEvent )
+            callbackRaw <- readSocket sock
+            let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
+            processAnsibleEvent (event callbackAE) callbackRaw
 
         ret <- wait pb
-
-        -- print(decodeJSON aaa :: AnsibleEvent)
-        -- print(decodeJSON aaa :: AnsibleEvent)
-        -- let a = decodeJSON aaa :: AnsibleRunnerResult
-
---        print a
+        cancel as
 
         closeSocket sock
+        removeFile sockPath
 
-        print ret
+        printf "Ansible return: %i" ret
