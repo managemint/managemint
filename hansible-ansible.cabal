@@ -32,10 +32,10 @@ executable hansible-ansible-exe
   build-depends:
       async
     , base >=4.7 && <5
+    , containers
     , lens
+    , mtl
     , network
-    , persistent
-    , persistent-mysql
     , time
     , unix
   default-language: Haskell2010

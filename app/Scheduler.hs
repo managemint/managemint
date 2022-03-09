@@ -3,103 +3,72 @@
 module Scheduler where
 
 import Ansible
-import Control.Concurrent
-import GHC.IO.Device (IODevice(isTerminal))
-import Data.IORef
-import Data.Functor ((<&>))
 import Data.Time.Clock
-import Data.List (delete, intercalate)
-import Data.Maybe (isJust, catMaybes)
-import Control.Monad (when)
+import Data.List (sort, intercalate)
+import Data.Maybe (isJust)
+import qualified Data.Map as M
 import Control.Lens
-import qualified Database.Persist.MySQL as MySQL
+import Control.Lens.At
+import Control.Monad.State
+import Control.Monad.Trans
 
--- Ich lese die User Jobs aus der Databse, erstelle Templates und darus Jobs die zu q hinzugefügt werden
--- Außerdem prüfe ich ob die Config Repo ein update hat
---   Ja   -> JobTemplate updaten und neue Instanzen bestimmen und damit die systemJobs ersetzen
---   Nein -> Nichts machen
--- Die fälligen user und systemjobs ausführen
--- Bei system jobs neue instanz hizufügen und falls fail failcount erhöhen (execute -> catMaybes -> calculateNextInstance)
+data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _playbook :: String , _optArgs:: [String], _failCount :: Int, _systemJob :: Bool}
+data Job = Job {_timeDue :: UTCTime, _templateName :: String}
+    deriving (Eq)
+data Schedule
 
-data JobTemplate = JobTemplate {_jobName :: String, _scheduleFormat :: Schedule, _playbook :: String , _optArgs:: [String], _failCount :: Int}
-    deriving (Eq)
--- A Job is an instance of a JobTemplate
-data Job = Job {_timeDue :: UTCTime, _template :: JobTemplate}
-    deriving (Eq)
+type JobTemplates = M.Map String JobTemplate
 type Jobs = [Job]
-data Queue = Queue {_systemJobs :: Jobs, _userJobs :: Jobs}
-data Schedule = Foo
-    deriving (Eq)
-
-makeLenses ''Job
-makeLenses ''JobTemplate
-makeLenses ''Queue
 
 instance Ord Job where
     compare j1 j2 = compare (_timeDue j1) (_timeDue j2)
 
-safeHead :: [a] -> Maybe a
-safeHead (x:xs) = Just x
-safeHead _      = Nothing
+makeLenses ''Job
+makeLenses ''JobTemplate
 
-insertSorted :: Ord a => [a] -> a -> [a]
-insertSorted []     x = [x]
-insertSorted (y:ys) x = case compare x y of
-                             GT -> y : insertSorted ys x
-                             _  -> x:y:ys
+calculateNextInstances :: StateT JobTemplates IO Jobs
+calculateNextInstances = do
+    templates <- get
+    time <- liftIO getCurrentTime
+    modify $ M.map removeUserJobTemplates <&> catMaybesMap
+    return $ sort $ map (calculateNextInstance time) $ M.elems templates
 
--- |Inserts the items from the first job list into the second
---Assumes that the first list is sorted
-mergeJobs :: Jobs -> Jobs -> Jobs
-mergeJobs = foldl insertJob
+catMaybesMap :: Ord k => M.Map k (Maybe v) -> M.Map k v
+catMaybesMap m = M.fromList $ foldr (\(k,v) l -> case v of {Just v' -> (k,v'):l; Nothing -> l}) [] (M.toList m)
 
--- |Inserts a job in the job list, keeps the sorting
-insertJob :: Jobs -> Job -> Jobs
-insertJob = insertSorted
-
-removeJob :: Job -> Jobs -> Jobs
-removeJob = delete
-
--- |Given a time, splits a job list in two parts; the due and upcoming ones
-splitJobsDue :: UTCTime -> Jobs -> (Jobs, Jobs)
-splitJobsDue time = span $ \job -> (job^.timeDue) <= time
-
-createUserJobs :: IO Jobs
-createUserJobs = undefined
-
-configRepoUpdate :: IO Bool
-configRepoUpdate = undefined
-
-readConfigRepo :: IO [JobTemplate]
-readConfigRepo = undefined
-
-calculateNextInstance :: JobTemplate -> IO Job
+calculateNextInstance :: UTCTime -> JobTemplate -> Job
 calculateNextInstance = undefined
 
-calculateNextInstances :: [JobTemplate] -> IO Jobs
-calculateNextInstances = mapM calculateNextInstance
+removeUserJobTemplates :: JobTemplate -> Maybe JobTemplate
+removeUserJobTemplates jt = if jt^.systemJob then Just jt else Nothing
 
--- |Runs the ansible job and if the job is recurring and failed less than 3 times, returns the next instance of that job
---Increases fail count if the job fails
-executeJob :: Job -> IO (Maybe Job)
+getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
+getDueJobs jobs = do
+    time <- liftIO getCurrentTime
+    return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
+
+executeJobs :: Jobs -> StateT JobTemplates IO ()
+executeJobs = mapM_ executeJob
+
+-- TODO: Dont execute Job if failcount exeeds a certain value
+executeJob :: Job -> StateT JobTemplates IO ()
 executeJob job = do
-    ret <- ansiblePlaybook "../ansible" (job^.template.playbook) (intercalate "," (job^.template.optArgs)) ""  -- TODO: Lookup how to join optional arguments
-    if ret == 1 || job^.template.failCount == 3 then return Nothing else return $ Just $ job & template.failCount %~ (+1)
+    template <- get
+    success  <- liftIO $ (==1) <$> ansiblePlaybook "../ansible" (template ^. ix (job^.templateName) . playbook) (intercalate "," (template ^. ix (job^.templateName) . optArgs)) ""
+    put $ template & ix (job^.templateName) %~ (& failCount %~ modi success)
+        where
+            modi :: Bool -> (Int -> Int)
+            modi True  = const 0
+            modi False = (+1)
 
-schedule :: IORef Queue -> [JobTemplate] -> IO ()
-schedule queueRef jobTempls = do
-    createUserJobs >>= \u -> modifyIORef queueRef (& userJobs %~ (`mergeJobs` u))
+updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
+updateConfigRepoJobTemplates = undefined
 
-    configRepoUpdate >>= \b -> when b $ do
-        newSysJobs <- readConfigRepo >>= calculateNextInstances
-        modifyIORef queueRef (& systemJobs .~ newSysJobs)
+readJobsDatabase :: IO JobTemplates
+readJobsDatabase = undefined
 
-    time  <- getCurrentTime
-    queue <- readIORef queueRef
-    let (dueUsr,upUsr) = splitJobsDue time (queue^.userJobs)
-    let (dueSys,upSys) = splitJobsDue time (queue^.systemJobs)
-
-    failedJobs <- mapM executeJob dueSys <&> catMaybes
-    mapM_ executeJob dueUsr
-
-    writeIORef queueRef $ Queue (mergeJobs upSys failedJobs) upUsr
+-- |Given a list of initial job templates (the ones from the config repo), updates them, reads the user jobs from the databse and executes all due ones
+runJobs :: JobTemplates -> IO JobTemplates
+runJobs jobTempls = do
+    jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs) jobTempls'

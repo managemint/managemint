@@ -30,6 +30,6 @@ executables:
     dependencies:
       - time
       - lens
-      - persistent
-      - persistent-mysql
+      - mtl
+      - containers
       #    - hansible-ansible
