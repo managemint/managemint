@@ -23,6 +23,13 @@ import Text.Printf
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON-Generic.html
 
+data AnsiblePlaybook = AnsiblePlaybook
+    { path :: String
+    , name :: String
+    , tags :: String
+    , limit :: String
+    } deriving (Show, Data)
+
 data AnsibleRunnerStart = AnsibleRunnerStart 
     { playbook :: String
     , playbook_id :: Int
@@ -89,13 +96,13 @@ processAnsibleEvent "task_runner_start" s =
         notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
 processAnsibleEvent e s = return ()
 
-exec :: IO ()
-exec = do
+exec :: AnsiblePlaybook -> IO ()
+exec pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
         sock <- createBindSocket sockPath
         let run = True
-        pb <- async $ ansiblePlaybook "ansible-example" "pb.yml" "limit" "tag"
+        pb <- async $ ansiblePlaybook (path pb) (name pb) (limit pb) (tags pb)
         as <- async $ forever $ do
             callbackRaw <- readSocket sock
             let callbackAE = decodeJSON callbackRaw :: AnsibleEvent

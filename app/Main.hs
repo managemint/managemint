@@ -3,4 +3,4 @@ import Executor
 
 main :: IO()
 main = do
-    exec
+    exec AnsiblePlaybook { path = "ansible-example", name = "pb.yml", limit = "", tags = "" }
