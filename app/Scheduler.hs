@@ -8,7 +8,6 @@ import Data.List (sort, intercalate)
 import Data.Maybe (isJust)
 import qualified Data.Map as M
 import Control.Lens
-import Control.Lens.At
 import Control.Monad.State
 import Control.Monad.Trans
 
@@ -31,12 +30,12 @@ calculateNextInstances = do
     templates <- get
     time <- liftIO getCurrentTime
     modify $ M.map removeUserJobTemplates <&> catMaybesMap
-    return $ sort $ map (calculateNextInstance time) $ M.elems templates
+    return $ sort $ map (calculateNextInstance time) $ M.toList templates
 
 catMaybesMap :: Ord k => M.Map k (Maybe v) -> M.Map k v
 catMaybesMap m = M.fromList $ foldr (\(k,v) l -> case v of {Just v' -> (k,v'):l; Nothing -> l}) [] (M.toList m)
 
-calculateNextInstance :: UTCTime -> JobTemplate -> Job
+calculateNextInstance :: UTCTime -> (String,JobTemplate) -> Job
 calculateNextInstance = undefined
 
 removeUserJobTemplates :: JobTemplate -> Maybe JobTemplate
