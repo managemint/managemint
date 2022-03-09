@@ -16,6 +16,7 @@ executable hansible-ansible-exe
   main-is: Main.hs
   other-modules:
       Ansible
+      Executor
       Sock
       Paths_hansible_ansible
   hs-source-dirs:
@@ -31,6 +32,9 @@ executable hansible-ansible-exe
   build-depends:
       async
     , base >=4.7 && <5
+    , bytestring
+    , directory
+    , json
     , network
     , unix
   default-language: Haskell2010

@@ -1,28 +1,6 @@
 module Main where
+import Executor
 
-import Ansible
-import Sock
-
-import Foreign.C.Types
-import Foreign.C.String
-
-import Control.Concurrent.Async
-
-import System.Posix.Env
-
-sockpath = "/tmp/socket"
-
-main :: IO ()
+main :: IO()
 main = do
-        putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockpath
-
-        sock <- createBindSocket sockpath
-
-        pb <- async $ ansiblePlaybook "ansible-example" "pb.yml" "limit" "tag"
-        as <- async $ readForever sock
-
-        ret <- wait pb
-
-        closeSocket sock
-
-        print ret
+    exec AnsiblePlaybook { path = "ansible-example", name = "pb.yml", limit = "", tags = "" }
