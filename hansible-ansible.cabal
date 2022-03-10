@@ -36,6 +36,6 @@ executable hansible-ansible-exe
     , lens
     , mtl
     , network
-    , time
+    , time-compat
     , unix
   default-language: Haskell2010

@@ -28,8 +28,8 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies:
-      - time
       - lens
       - mtl
       - containers
+      - time-compat
       #    - hansible-ansible
