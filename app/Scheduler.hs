@@ -19,7 +19,7 @@ data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
     deriving (Eq)
 data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime}
-data ScheduleTime = ScheduleTime {_startTime :: [TimeOfDay], _repetitionTime :: [Int]}
+data ScheduleTime = ScheduleTime {_startTime :: [TimeOfDay], _repetitionTime :: [TimeOfDay]}
 
 type JobTemplates = M.Map String JobTemplate
 type Jobs = [Job]
@@ -45,11 +45,8 @@ calculateNextInstances :: StateT JobTemplates IO Jobs
 calculateNextInstances = do
     templates <- get
     time <- liftIO getTime
-    modify $ M.map removeUserJobTemplates <&> catMaybesMap
-    return $ map (calculateNextInstance time) $ M.toList templates
-
-catMaybesMap :: Ord k => M.Map k (Maybe v) -> M.Map k v
-catMaybesMap m = M.fromList $ foldr (\(k,v) l -> case v of {Just v' -> (k,v'):l; Nothing -> l}) [] (M.toList m)
+    modify $ M.filter (^. systemJob)
+    return $ map (calculateNextInstance time) $ M.toList template
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
 calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedule.scheduleTime) daysThisWeek, _templateName = name}
@@ -58,19 +55,20 @@ calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedu
         daysThisWeek = concatMap (weekStartingAt (localDay time)) $ templ^.schedule.scheduleDay
         dueTime :: Maybe ScheduleTime -> [Day] -> LocalTime
         dueTime st days = case st of
-                            --                                             This are all possible LocalTimes
+                                                                        -- These are all possible LocalTimes
                             Just schedTime -> minimum $ filter (>= time) $ LocalTime <$> days <*> scheduleTimeToList schedTime
                             Nothing        -> LocalTime (days!!1) midnight
 
 scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
-scheduleTimeToList = undefined
+scheduleTimeToList st = []
+    where
+        start = st^.startTime
+        repetition = st^.repetitionTime
+
 
 -- |Calculates the first week beginning on a certain day of the week after a certain day
 weekStartingAt :: Day -> DayOfWeek -> [Day]
 weekStartingAt startDay weekDay = take 7 $ iterate succ $ firstDayOfWeekOnAfter weekDay startDay
-
-removeUserJobTemplates :: JobTemplate -> Maybe JobTemplate
-removeUserJobTemplates jt = if jt^.systemJob then Just jt else Nothing
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
@@ -86,11 +84,7 @@ executeJob job = do
     when (maybe False (\x -> x ^. failCount <= failMax) (template ^? ix (job^.templateName))) $ do  -- TODO: Change to exec
         success  <- liftIO $ (==1) <$> ansiblePlaybook "../ansible" (template ^. ix (job^.templateName) . playbook) "" ""
         let success = False
-        put $ template & ix (job^.templateName) %~ (& failCount %~ modi success)
-        where
-            modi :: Bool -> (Int -> Int)
-            modi True  = const 0
-            modi False = (+1)
+        put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
 
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates = undefined
