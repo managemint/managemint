@@ -30,7 +30,7 @@ data AnsiblePlaybook = AnsiblePlaybook
     , limit :: String
     } deriving (Show, Data)
 
-data AnsibleRunnerStart = AnsibleRunnerStart 
+data AnsibleRunnerStart = AnsibleRunnerStart
     { playbook :: String
     , playbook_id :: Int
     , play :: String
@@ -96,7 +96,7 @@ processAnsibleEvent "task_runner_start" s =
         notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
 processAnsibleEvent e s = return ()
 
-exec :: AnsiblePlaybook -> IO ()
+exec :: AnsiblePlaybook -> IO Bool
 exec pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
@@ -104,14 +104,19 @@ exec pb = do
         let run = True
         pb <- async $ ansiblePlaybook (path pb) (name pb) (limit pb) (tags pb)
         as <- async $ forever $ do
+            -- Poll pb-thread
             callbackRaw <- readSocket sock
             let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
             processAnsibleEvent (event callbackAE) callbackRaw
 
         ret <- wait pb
-        cancel as
 
         closeSocket sock
+        ret2 <- wait as
+        -- cancel as
+
         removeFile sockPath
 
         printf "Ansible return: %i" ret
+        -- when ansible return
+        return False
