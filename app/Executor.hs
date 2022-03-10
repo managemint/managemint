@@ -4,6 +4,7 @@ module Executor where
 
 import Ansible
 import Sock
+import Config
 
 import Foreign.C.Types
 import Foreign.C.String
@@ -76,7 +77,7 @@ newtype AnsibleEvent = AnsibleEvent
     } deriving (Show, Data)
 
 -- TODO put in /run
-sockPath = "/tmp/hansible.sock"
+sockPath = executorSockPath
 
 notifyDatabase :: AnsibleRunnerResult -> IO ()
 notifyDatabase arr = do
