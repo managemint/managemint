@@ -1,5 +1,5 @@
 {-# LANGUAGE CApiFFI, ForeignFunctionInterface #-}
-module Git where
+module Git(isRepo, doClone, doPull, getLastOid) where
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Alloc
