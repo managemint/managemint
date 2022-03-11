@@ -31,5 +31,9 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    dependencies: []
+    dependencies:
+      - lens
+      - mtl
+      - containers
+      - time-compat
       #    - hansible-ansible
