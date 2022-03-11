@@ -11,6 +11,7 @@ cc-options:
 include-dirs: csrc/
 extra-libraries:
   - python3.10
+  - git2
 
 dependencies:
 - base >= 4.7 && < 5
@@ -20,6 +21,16 @@ dependencies:
 - json
 - bytestring
 - directory
+- yesod
+- yesod-persistent
+- yesod-core
+- persistent
+- persistent-mysql >= 2.13.1
+- text
+- monad-logger
+- persistent-template
+- yesod-form
+
 
 
 executables:
@@ -30,5 +41,10 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    dependencies: []
+    dependencies:
+      - lens
+      - mtl
+      - containers
+      - time-compat
+      - Cabal
       #    - hansible-ansible

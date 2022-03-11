@@ -1,4 +1,5 @@
 module Sock where
+import Config
 import Control.Monad (forever)
 
 import Network.Socket
@@ -6,7 +7,7 @@ import Network.Socket.ByteString (recv)
 import Data.ByteString.Internal
 
 readLen :: Int
-readLen = 2048
+readLen = sockReadLen
 
 createBindSocket :: String -> IO Socket
 createBindSocket s = do

@@ -1,2 +1,7 @@
 .stack-work/
+*.cabal
+*.lock
+dist-newstyle/
 *~
+hie.yaml
+client_session_key.aes
