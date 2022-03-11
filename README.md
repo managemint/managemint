@@ -1,5 +1,7 @@
 # hansible
 
+![hansible](logo.png "hansible")
+
 Teilnehmer:
 
 - Konstantin Grabmann

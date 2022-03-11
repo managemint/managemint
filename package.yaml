@@ -11,12 +11,16 @@ cc-options:
 include-dirs: csrc/
 extra-libraries:
   - python3.10
+  - git2
 
 dependencies:
 - base >= 4.7 && < 5
 - network
 - async
 - unix
+- json
+- bytestring
+- directory
 
 
 executables:

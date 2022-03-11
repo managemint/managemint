@@ -1,8 +1,13 @@
 module Sock where
+import Config
 import Control.Monad (forever)
 
 import Network.Socket
 import Network.Socket.ByteString (recv)
+import Data.ByteString.Internal
+
+readLen :: Int
+readLen = sockReadLen
 
 createBindSocket :: String -> IO Socket
 createBindSocket s = do
@@ -15,4 +20,9 @@ closeSocket = close
 
 readForever :: Socket -> IO()
 readForever s = forever $ do
-        print =<< recv s 2048
+        print =<< recv s readLen
+
+readSocket :: Socket -> IO [Char]
+readSocket s = do
+    ret <- recv s readLen
+    return $ unpackChars ret

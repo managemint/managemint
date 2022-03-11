@@ -1,0 +1,205 @@
+#include "git.h"
+
+#include <alloca.h>
+#include <git2.h>
+#include <git2/annotated_commit.h>
+#include <git2/branch.h>
+#include <git2/credential.h>
+#include <git2/global.h>
+#include <git2/merge.h>
+#include <git2/object.h>
+#include <git2/refs.h>
+#include <git2/remote.h>
+#include <git2/repository.h>
+#include <git2/strarray.h>
+
+#include <git2/types.h>
+#include <string.h>
+
+//TODO Remove
+#include <stdio.h>
+
+#define ASSERT_GIT_CALL(a,r) {if(a!=0){ret=r; print_last_errstr(); goto error;}}
+
+#define _GIT_DEFAULT_REMOTE "origin"
+
+// https://libgit2.org/docs/guides/101-samples/
+
+/* TODO
+ * - Sanitize paths
+ */
+
+git_oid glbl__merge_oid;
+int	glbl__merge_oid_set;
+
+static int auth_callback(git_cred **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) {
+	// TODO other stuff
+	return git_credential_ssh_key_from_agent(out, username_from_url);
+}
+
+// TODO ugly AF...
+static int refspecs_match(const char *_name, const char *_ref) {
+	size_t len_ref = 0;
+	size_t len_name = 0;
+
+	if (!_name || !_ref)
+		return 0;
+	
+	len_ref  = strlen(_ref);
+	len_name = strlen(_name);
+
+	if( len_name <= len_ref)
+		return 0;
+
+	for (int i = 0; i < len_name; i++) {
+		int i_n = len_name - i - 1;
+		int i_r = len_ref  - i - 1;
+
+		if (i >= len_ref) {
+			if (_name[i_n] == '/')
+				return 1;
+			return 0;
+		}
+
+		if ( _name[i_n] != _ref[i_r] )
+			return 0;
+	}
+
+	return 0;
+}
+
+static int fetchhead_ref_callback(const char *_name, const char *_url, const git_oid *_oid, unsigned int _is_merge, void *_payload) {
+	if (!refspecs_match(_name, (char*)_payload))
+		return 0;
+
+	if ( _is_merge ) {
+		memcpy( &glbl__merge_oid, _oid, sizeof( git_oid ) );
+		glbl__merge_oid_set = 1;
+	}
+
+	return 0;
+}
+
+static void print_last_errstr() {
+	const git_error *err = git_error_last();
+
+	if (err) {
+		printf("%s\n", err->message);
+	}
+}
+
+char *get_last_merge_oid() {
+	char *ret = NULL;
+	size_t len = GIT_OID_HEXSZ+1;
+
+	if(! (ret = malloc(len)) )
+		return ret;
+
+	git_oid_tostr(ret, len, &glbl__merge_oid);
+
+	return ret;
+}
+
+int is_repo(char* _path, char* _remote) {
+	int ret = -2;
+	git_repository *repo = NULL;
+	git_strarray remotes = {0};
+	git_remote *remote = NULL;
+
+
+	git_libgit2_init();
+
+	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL), HSGIT_NOT_A_REPO );
+	ASSERT_GIT_CALL( git_remote_list(&remotes, repo), -1 );
+
+	if (remotes.count <= 0) {
+		ret = HSGIT_INCORRECT_REMOTE;
+		goto error;
+	}
+
+	for (unsigned int i = 0; i < remotes.count; i++) {
+		ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, remotes.strings[i]), HSGIT_INCORRECT_REMOTE );
+
+		if (strcmp(git_remote_url(remote), _remote) == 0) {
+			ret = GIT_OK;
+			break;
+		}
+	}
+
+end:
+	git_repository_free(repo);
+	git_strarray_free(&remotes);
+	git_remote_free(remote);
+
+	git_libgit2_shutdown();
+	return ret;
+error:
+	goto end;
+}
+
+int do_git_clone(char* _url, char* _path, char* _refspec) {
+	int ret = -1;
+	git_repository* repo = NULL;
+	git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
+	const git_error *err;
+
+	clone_opts.checkout_branch = _refspec;
+	clone_opts.fetch_opts.callbacks.credentials = auth_callback;
+
+	git_libgit2_init();
+
+	ASSERT_GIT_CALL(git_clone(&repo, _url, _path, &clone_opts), HSGIT_CALL_FAILED);
+
+	ret = 0;
+
+end:
+	git_repository_free(repo);
+	git_libgit2_shutdown();
+	return ret;
+error:
+	// TODO delete directory if failed?
+	goto end;
+}
+
+int do_git_pull(char* _path, char* _refspec) {
+	int ret = -1;
+	git_repository *repo = NULL;
+	git_remote *remote = NULL;
+
+	git_annotated_commit *heads[ 1 ] = {NULL};
+
+	git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
+	git_checkout_options checkout_opts = GIT_CHECKOUT_OPTIONS_INIT;
+	git_merge_options merge_opts = GIT_MERGE_OPTIONS_INIT;
+
+	fetch_opts.callbacks.credentials = auth_callback;
+	checkout_opts.checkout_strategy = GIT_CHECKOUT_SAFE;
+
+	git_libgit2_init();
+
+	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL), HSGIT_NOT_A_REPO );
+
+	ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, _GIT_DEFAULT_REMOTE), HSGIT_INCORRECT_REMOTE );
+	ASSERT_GIT_CALL( git_remote_fetch(remote, NULL, &fetch_opts, NULL), HSGIT_FETCH_FAILED );
+
+	glbl__merge_oid_set = 0;
+	git_repository_fetchhead_foreach( repo, fetchhead_ref_callback, _refspec );
+
+	if(!glbl__merge_oid_set) {
+		ret = HSGIT_MERGE_FAILED;
+		goto error;
+	}
+
+	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid), HSGIT_MERGE_FAILED );
+	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts), HSGIT_MERGE_FAILED );
+
+	ret = 0;
+
+error:
+end:
+	git_repository_free(repo);
+	git_remote_free(remote);
+	git_annotated_commit_free(heads[0]);
+	git_libgit2_shutdown();
+	return ret;
+}
