@@ -1,11 +1,14 @@
 #pragma once
 
-#define GIT_OK			0
-#define GIT_NOT_A_REPO		-1
-#define GIT_INCORRECT_REMOTE	-2
-#define GIT_CALL_FAILED		-3
-#define GIT_FETCH_FAILED	-4
-#define GIT_CHECKOUT_FAILED	-5
+#define HSGIT_OK		0
+#define HSGIT_NOT_A_REPO	-1
+#define HSGIT_INCORRECT_REMOTE	-2
+#define HSGIT_CALL_FAILED	-3
+#define HSGIT_FETCH_FAILED	-4
+#define HSGIT_CHECKOUT_FAILED	-5
+#define HSGIT_MERGE_FAILED	-6
+
+char *get_last_merge_oid();
 
 int is_repo(char* _path, char* _remote);
 
