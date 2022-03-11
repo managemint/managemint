@@ -3,3 +3,4 @@
 *.lock
 dist-newstyle/
 *~
+hie.yaml

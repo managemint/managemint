@@ -1,8 +1,10 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE GADTs #-}
 
 module Scheduler where
 
-import Ansible
+import qualified Executor as E
+import Config
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
 import Data.Time.LocalTime.Compat
@@ -32,8 +34,6 @@ makeLenses ''JobTemplate
 makeLenses ''Schedule
 makeLenses ''ScheduleTime
 makeLensesFor [("todMin", "todMinL"), ("todHour", "todHourL")] ''TimeOfDay
-
-failMax = 3
 
 getTime :: IO LocalTime
 getTime = do
@@ -89,9 +89,12 @@ executeJobs = mapM_ executeJob
 executeJob :: Job -> StateT JobTemplates IO ()
 executeJob job = do
     template <- get
-    when (maybe False (\x -> x ^. failCount <= failMax) (template ^? ix (job^.templateName))) $ do  -- TODO: Change to exec
-        success  <- liftIO $ (==1) <$> ansiblePlaybook "../ansible" (template ^. ix (job^.templateName) . playbook) "" ""
+    when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
+        liftIO $ E.exec E.AnsiblePlaybook{E.path=template `dot` repoPath, E.name=template `dot` playbook, E.tags="", E.limit=""} -- TODO: Add support for tags and limit when Executor has it
+        let success = False -- TODO: Remove
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
+            where
+                dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
 
 -- Read Project from Database, look if exisits
 --   No  -> Write Failed run in Databse

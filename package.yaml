@@ -36,4 +36,5 @@ executables:
       - mtl
       - containers
       - time-compat
+      - Cabal
       #    - hansible-ansible
