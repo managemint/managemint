@@ -31,6 +31,7 @@ makeLenses ''Job
 makeLenses ''JobTemplate
 makeLenses ''Schedule
 makeLenses ''ScheduleTime
+makeLensesFor [("todMin", "todMinL"), ("todHour", "todHourL")] ''TimeOfDay
 
 failMax = 3
 
@@ -46,7 +47,7 @@ calculateNextInstances = do
     templates <- get
     time <- liftIO getTime
     modify $ M.filter (^. systemJob)
-    return $ map (calculateNextInstance time) $ M.toList template
+    return $ map (calculateNextInstance time) $ M.toList templates
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
 calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedule.scheduleTime) daysThisWeek, _templateName = name}
@@ -60,11 +61,18 @@ calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedu
                             Nothing        -> LocalTime (days!!1) midnight
 
 scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
-scheduleTimeToList st = []
+scheduleTimeToList st = concat [ takeWhile (<= maxTime start rep) $ iterate (addTimeOfDay rep) start
+                               | start <- st^.startTime, rep <- st^.repetitionTime ]
     where
-        start = st^.startTime
-        repetition = st^.repetitionTime
+        maxTime :: TimeOfDay -> TimeOfDay -> TimeOfDay
+        maxTime time rep = case rep^.todHourL of
+                             0 -> if time^.todMinL + rep^.todMinL < 60 then maxTime (time & todMinL  %~ (+rep^.todMinL)) rep else time  -- Semms correct
+                             x -> if time^.todHourL + x < 24 then maxTime (addTimeOfDay time rep) rep else time  -- TODO: Fix bug
 
+-- |Addes two TimeOfDays ignoring the seconds
+addTimeOfDay :: TimeOfDay -> TimeOfDay -> TimeOfDay
+addTimeOfDay TimeOfDay{todHour=t1h, todMin=t1m} TimeOfDay{todHour=t2h, todMin=t2m} =
+    TimeOfDay{todHour=(t1h+t2h + ((t1m+t2m) `div` 60)) `mod` 24, todMin=(t1m+t2m) `mod` 60, todSec=0}
 
 -- |Calculates the first week beginning on a certain day of the week after a certain day
 weekStartingAt :: Day -> DayOfWeek -> [Day]
@@ -83,9 +91,13 @@ executeJob job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= failMax) (template ^? ix (job^.templateName))) $ do  -- TODO: Change to exec
         success  <- liftIO $ (==1) <$> ansiblePlaybook "../ansible" (template ^. ix (job^.templateName) . playbook) "" ""
-        let success = False
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
 
+-- Read Project from Database, look if exisits
+--   No  -> Write Failed run in Databse
+--   Yes -> Clone/Update Repo
+--     Parse and fill JobTemplates
+--       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates = undefined
 
