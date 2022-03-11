@@ -61,13 +61,17 @@ calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedu
                             Nothing        -> LocalTime (days!!1) midnight
 
 scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
-scheduleTimeToList st = concat [ takeWhile (<= maxTime start rep) $ iterate (addTimeOfDay rep) start
+scheduleTimeToList st = concat [ takeWhile (betweenEq start (maxTime start rep)) $ iterate (addTimeOfDay rep) start
                                | start <- st^.startTime, rep <- st^.repetitionTime ]
     where
         maxTime :: TimeOfDay -> TimeOfDay -> TimeOfDay
         maxTime time rep = case rep^.todHourL of
-                             0 -> if time^.todMinL + rep^.todMinL < 60 then maxTime (time & todMinL  %~ (+rep^.todMinL)) rep else time  -- Semms correct
-                             x -> if time^.todHourL + x < 24 then maxTime (addTimeOfDay time rep) rep else time  -- TODO: Fix bug
+                             0 -> if time^.todMinL + rep^.todMinL < 60 then maxTime (time & todMinL  %~ (+rep^.todMinL)) rep else time
+                             x -> if time^.todHourL + x < 24 then maxTime (addTimeOfDay time rep) rep else time
+
+-- |betweenEq l u x == l <= x <= u
+betweenEq :: Ord a => a -> a -> a -> Bool
+betweenEq lower upper x = lower <= x && x <= upper
 
 -- |Addes two TimeOfDays ignoring the seconds
 addTimeOfDay :: TimeOfDay -> TimeOfDay -> TimeOfDay
