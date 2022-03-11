@@ -4,13 +4,11 @@
 module Scheduler where
 
 import qualified Executor as E
+import ScheduleFormat
 import Config
-import Data.Time.Compat
-import Data.Time.Calendar.Compat
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
-import Data.List (sort, intercalate)
-import Data.Maybe (isJust)
+import Data.List (sort)
 import qualified Data.Map as M
 import Control.Lens
 import Control.Monad (when)
@@ -20,8 +18,6 @@ import Control.Monad.Trans
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
     deriving (Eq)
-data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime}
-data ScheduleTime = ScheduleTime {_startTime :: [TimeOfDay], _repetitionTime :: [TimeOfDay]}
 
 type JobTemplates = M.Map String JobTemplate
 type Jobs = [Job]
@@ -31,9 +27,6 @@ instance Ord Job where
 
 makeLenses ''Job
 makeLenses ''JobTemplate
-makeLenses ''Schedule
-makeLenses ''ScheduleTime
-makeLensesFor [("todMin", "todMinL"), ("todHour", "todHourL")] ''TimeOfDay
 
 getTime :: IO LocalTime
 getTime = do
@@ -50,37 +43,7 @@ calculateNextInstances = do
     return $ map (calculateNextInstance time) $ M.toList templates
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
-calculateNextInstance time (name,templ) = Job {_timeDue = dueTime (templ^.schedule.scheduleTime) daysThisWeek, _templateName = name}
-    where
-        daysThisWeek :: [Day]
-        daysThisWeek = concatMap (weekStartingAt (localDay time)) $ templ^.schedule.scheduleDay
-        dueTime :: Maybe ScheduleTime -> [Day] -> LocalTime
-        dueTime st days = case st of
-                                                                        -- These are all possible LocalTimes
-                            Just schedTime -> minimum $ filter (>= time) $ LocalTime <$> days <*> scheduleTimeToList schedTime
-                            Nothing        -> LocalTime (days!!1) midnight
-
-scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
-scheduleTimeToList st = concat [ takeWhile (betweenEq start (maxTime start rep)) $ iterate (addTimeOfDay rep) start
-                               | start <- st^.startTime, rep <- st^.repetitionTime ]
-    where
-        maxTime :: TimeOfDay -> TimeOfDay -> TimeOfDay
-        maxTime time rep = case rep^.todHourL of
-                             0 -> if time^.todMinL + rep^.todMinL < 60 then maxTime (time & todMinL  %~ (+rep^.todMinL)) rep else time
-                             x -> if time^.todHourL + x < 24 then maxTime (addTimeOfDay time rep) rep else time
-
--- |betweenEq l u x == l <= x <= u
-betweenEq :: Ord a => a -> a -> a -> Bool
-betweenEq lower upper x = lower <= x && x <= upper
-
--- |Addes two TimeOfDays ignoring the seconds
-addTimeOfDay :: TimeOfDay -> TimeOfDay -> TimeOfDay
-addTimeOfDay TimeOfDay{todHour=t1h, todMin=t1m} TimeOfDay{todHour=t2h, todMin=t2m} =
-    TimeOfDay{todHour=(t1h+t2h + ((t1m+t2m) `div` 60)) `mod` 24, todMin=(t1m+t2m) `mod` 60, todSec=0}
-
--- |Calculates the first week beginning on a certain day of the week after a certain day
-weekStartingAt :: Day -> DayOfWeek -> [Day]
-weekStartingAt startDay weekDay = take 7 $ iterate succ $ firstDayOfWeekOnAfter weekDay startDay
+calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.schedule), _templateName = name}
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
