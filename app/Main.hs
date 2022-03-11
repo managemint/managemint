@@ -11,18 +11,16 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+module Main where
 
-import Data.IORef
 import Data.Text
 import Yesod
 import Yesod.Core
-import Yesod.Form.Jquery
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
 import Control.Monad.Logger (runStderrLoggingT)
-
-data App = App { connections :: ConnectionPool }
+import Control.Concurrent.Async
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
@@ -52,6 +50,20 @@ JobQueue
     triggerDate String
 |]
 
+getProjects :: ConnectionPool -> IO [Entity Project]
+getProjects pool = runSqlPool (selectList [] [Asc ProjectId]) pool
+
+getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
+getPlaybooks projectid pool = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+
+addRun :: Key Playbook -> Run -> ConnectionPool -> IO (Key Run)
+addRun playbookid run pool = runSqlPool (insert $ run) pool
+
+addEvent :: Key Run -> Event -> ConnectionPool -> IO (Key Event)
+addEvent runid event pool = runSqlPool (insert $ event) pool
+
+data App = App { connections :: ConnectionPool }
+
 data AddRepository = AddRepository
         { repoURL :: Text
         , repoBranch :: Text
@@ -67,18 +79,6 @@ data ButtonForm = ButtonForm
 
 buttonForm val = renderDivs $ ButtonForm
         <$> areq hiddenField "" (Just val)
-
-getProjects :: ConnectionPool -> IO [Entity Project]
-getProjects pool = runSqlPool (selectList [] [Asc ProjectId]) pool
-
-getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
-getPlaybooks projectid pool = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-
-addRun :: Key Playbook -> Run -> ConnectionPool -> IO (Key Run)
-addRun playbookid run pool = runSqlPool (insert $ run) pool
-
-addEvent :: Key Run -> Event -> ConnectionPool -> IO (Key Event)
-addEvent runid event pool = runSqlPool (insert $ event) pool
 
 mkYesod "App" [parseRoutes|
 / HomeR GET POST
@@ -138,6 +138,10 @@ getHomeR = do
 postHomeR :: Handler Html
 postHomeR = getHomeR
 
+runWebserver :: ConnectionPool -> IO ()
+runWebserver conn = warp 3000 App { connections = conn }
+
+
 connectionInfo :: ConnectInfo
 connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
                                     , connectUser     = "hansible"
@@ -145,10 +149,14 @@ connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
                                     , connectDatabase = "hansible"
                                     }
 
+runScheduler :: ConnectionPool -> IO ()
+runScheduler _ = pure ()
+
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
         flip runSqlPersistMPool pool $ do
             runMigration migrateAll
-        warp 3000 App { connections = pool }
+        _ <- async $ runScheduler pool
+        runWebserver pool
 

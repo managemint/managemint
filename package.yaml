@@ -21,6 +21,16 @@ dependencies:
 - json
 - bytestring
 - directory
+- yesod
+- yesod-persistent
+- yesod-core
+- persistent
+- persistent-mysql >= 2.13.1
+- text
+- monad-logger
+- persistent-template
+- yesod-form
+
 
 
 executables:
