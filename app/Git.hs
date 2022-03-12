@@ -1,3 +1,13 @@
+{- app/Git.hs
+ -
+ - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
+ -
+ - This program is free software; you can redistribute it and/or modify
+ - it under the terms of the GNU General Public License version 3 as
+ - published by the Free Software Foundation.
+ -
+ -}
+
 {-# LANGUAGE CApiFFI, ForeignFunctionInterface #-}
 module Git where
 import Foreign.C.Types
