@@ -1,6 +1,16 @@
+{- app/Executor.hs
+ -
+ - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
+ -
+ - This program is free software; you can redistribute it and/or modify
+ - it under the terms of the GNU General Public License version 3 as
+ - published by the Free Software Foundation.
+ -
+ -}
+
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DuplicateRecordFields #-}
-module Executor where
+module Executor(AnsiblePlaybook(..), execPlaybook) where
 
 import Ansible
 import Sock
@@ -12,26 +22,29 @@ import Foreign.C.String
 import Control.Concurrent.Async
 import Control.Monad
 
+import Data.Maybe
+
 import System.Posix.Env
 import System.Directory
 
 import Text.JSON
 import Text.JSON.Generic
-
 import Text.Printf
+
+import Database.Persist.MySQL
 
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html#t:JSON
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON-Generic.html
 
 data AnsiblePlaybook = AnsiblePlaybook
-    { path :: String
-    , name :: String
-    , tags :: String
-    , limit :: String
+    { executionPath :: String
+    , playbookName :: String
+    , executeTags :: String
+    , targetLimit :: String
     } deriving (Show, Data)
 
-data AnsibleRunnerStart = AnsibleRunnerStart 
+data AnsibleRunnerStart = AnsibleRunnerStart
     { playbook :: String
     , playbook_id :: Int
     , play :: String
@@ -97,22 +110,26 @@ processAnsibleEvent "task_runner_start" s =
         notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
 processAnsibleEvent e s = return ()
 
-exec :: AnsiblePlaybook -> IO ()
-exec pb = do
+execPlaybook :: ConnectionPool -> AnsiblePlaybook -> IO Bool
+execPlaybook pool pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
         sock <- createBindSocket sockPath
-        let run = True
-        pb <- async $ ansiblePlaybook (path pb) (name pb) (limit pb) (tags pb)
+
+        pb <- async $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
         as <- async $ forever $ do
+            -- Poll pb-thread
             callbackRaw <- readSocket sock
             let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
             processAnsibleEvent (event callbackAE) callbackRaw
 
         ret <- wait pb
-        cancel as
 
         closeSocket sock
+        -- We want to catch the "Bad File descriptor" of the previously
+        -- closed socket
+        poll as >>= \x -> when (isNothing x) $ void(waitCatch as)
+
         removeFile sockPath
 
-        printf "Ansible return: %i" ret
+        return $ ret==0

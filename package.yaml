@@ -1,9 +1,12 @@
-name:                hansible-ansible
+name:                hansible
 version:             0.1.0.0
-license:             AllRightsReserved
-author:              "Jonas Gunz"
+license:             GPL-3
+author:
+  - "Jonas Gunz"
+  - "Konstantin Grabmann"
+  - "Paul Trojahn"
 maintainer:          "himself@jonasgunz.de"
-copyright:           "2022 Jonas Gunz"
+copyright:           "2022 Jonas Gunz, Konstantin Grabmanm, Paul Trojahn"
 
 c-sources: csrc/*.c
 cc-options:
@@ -30,20 +33,22 @@ dependencies:
 - monad-logger
 - persistent-template
 - yesod-form
+- lens
+- mtl
+- containers
+- time-compat
+- Cabal
+- split >= 0.2.3.4
 
 
 
 executables:
-  hansible-ansible-exe:
+  hansible-exe:
     main:                Main.hs
     source-dirs:         app
     ghc-options:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    dependencies:
-      - lens
-      - mtl
-      - containers
-      - time-compat
+    dependencies: []
       #    - hansible-ansible
