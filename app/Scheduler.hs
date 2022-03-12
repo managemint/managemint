@@ -3,7 +3,7 @@
 
 module Scheduler where
 
-import qualified Executor as E
+import Executor
 import ScheduleFormat
 import Config
 import Data.Time.LocalTime.Compat
@@ -57,8 +57,7 @@ executeJob :: Job -> StateT JobTemplates IO ()
 executeJob job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        liftIO $ E.exec E.AnsiblePlaybook{E.path=template `dot` repoPath, E.name=template `dot` playbook, E.tags="", E.limit=""} -- TODO: Add support for tags and limit when Executor has it
-        let success = False -- TODO: Remove
+        success <- liftIO $ execPlaybook AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
@@ -74,7 +73,7 @@ updateConfigRepoJobTemplates = undefined
 readJobsDatabase :: IO JobTemplates
 readJobsDatabase = undefined
 
--- |Given a list of initial job templates (the ones from the config repo), updates them, reads the user jobs from the databse and executes all due ones
+-- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: JobTemplates -> IO JobTemplates
 runJobs jobTempls = do
     jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend

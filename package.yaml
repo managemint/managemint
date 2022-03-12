@@ -33,6 +33,12 @@ dependencies:
 - monad-logger
 - persistent-template
 - yesod-form
+- lens
+- mtl
+- containers
+- time-compat
+- Cabal
+- split >= 0.2.3.4
 
 
 
@@ -44,10 +50,5 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
-    dependencies:
-      - lens
-      - mtl
-      - containers
-      - time-compat
-      - Cabal
+    dependencies: []
       #    - hansible-ansible
