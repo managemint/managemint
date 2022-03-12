@@ -63,8 +63,9 @@ executeJob job = do
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
 
 -- Read Project from Database, look if exisits
---   No  -> Write Failed run in Databse
---   Yes -> Clone/Update Repo
+--   No  -> Write Failed in Project table
+--   Yes -> Clone/Update Repo Write Run with Run status running and pass key to exec 
+--   Delte folder if clone update fail
 --     Parse and fill JobTemplates
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
