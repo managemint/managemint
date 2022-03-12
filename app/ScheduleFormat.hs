@@ -1,29 +1,59 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat where
+module ScheduleFormat (Schedule (..), nextInstance) where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
+import Data.Functor ((<&>))
+import Data.List.Split (splitOn)
+import Data.Containers.ListUtils
 import Control.Lens
+import Text.Read
 
 data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime}
-data ScheduleTime = 
+data ScheduleTime =
     ScheduleTime { _startTime :: [TimeOfDay]
                  , _repetitionTime :: [TimeOfDay]
                  }
-
 
 -- Für Parser:
 --   Format: [day(s)] [[start-time(s)][/repetition-time(s)]]
 --     Wenn [/repetition-time(s)] nicht gegeben ist, lese alle 24h ein
 --     Sodersyntax schon beim Parsen auflößen, z.B. *:00 zu 0:00,1:00,...,23:00
-
+-- Idee: splitOn ' ' und '/' und seperat parsen
 
 makeLenses ''Schedule
 makeLenses ''ScheduleTime
 makeLensesFor [("todMin", "todMinL"), ("todHour", "todHourL")] ''TimeOfDay
+
+allFullHours :: [TimeOfDay]
+allFullHours = take 12 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
+
+-- |breakOn '=' "x=1" == ("x","1")
+breakOn :: Eq a => a -> [a] -> ([a],[a])
+breakOn x = break (/= x)
+
+parseDaysFormat :: String -> Maybe [DayOfWeek]
+parseDaysFormat ds = nubOrd . concat <$> mapM parseEnumDays (splitOn "," ds)
+    where
+        parseEnumDays :: String -> Maybe [DayOfWeek]
+        parseEnumDays s = case splitOn ".." s of
+                         [x]   -> parseDayOfWeek x <&> (:[])
+                         [l,r] -> enumFromTo <$> parseDayOfWeek l <*> parseDayOfWeek r
+                         _     -> Nothing
+
+parseDayOfWeek :: String -> Maybe DayOfWeek
+parseDayOfWeek s = case s of
+                     "mon" -> Just Monday
+                     "tue" -> Just Tuesday
+                     "wen" -> Just Wednesday
+                     "thu" -> Just Thursday
+                     "fri" -> Just Friday
+                     "sat" -> Just Saturday
+                     "sun" -> Just Sunday
+                     _     -> Nothing
 
 -- |Given a time and a Schedule expression, calculates the soonest time that matches the expression
 nextInstance :: LocalTime -> Schedule -> LocalTime
