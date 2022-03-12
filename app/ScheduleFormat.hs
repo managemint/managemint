@@ -7,6 +7,7 @@ import Data.Time.Calendar.Compat
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
 import Data.Functor ((<&>))
+import Data.List (intercalate)
 import Data.List.Split (splitOn)
 import Data.Containers.ListUtils
 import Control.Lens
@@ -28,12 +29,14 @@ makeLenses ''Schedule
 makeLenses ''ScheduleTime
 makeLensesFor [("todMin", "todMinL"), ("todHour", "todHourL")] ''TimeOfDay
 
+instance Show ScheduleTime where --TODO: Debugging purpose, remove or change!!
+    show s = intercalate "," (map show (s^.startTime)) ++ "/" ++ intercalate "," (map show (s^.repetitionTime))
+
+instance Show Schedule where --TODO: Debugging purpose, remove or change!!
+    show s = intercalate "," (map show (s^.scheduleDay)) ++ " " ++ maybe [] show (s^.scheduleTime)
+
 allFullHours :: [TimeOfDay]
 allFullHours = take 12 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
-
--- |breakOn '=' "x=1" == ("x","1")
-breakOn :: Eq a => a -> [a] -> ([a],[a])
-breakOn x = break (/= x)
 
 parseDaysFormat :: String -> Maybe [DayOfWeek]
 parseDaysFormat ds = nubOrd . concat <$> mapM parseEnumDays (splitOn "," ds)
@@ -57,34 +60,48 @@ parseDayOfWeek s = case s of
 
 -- |Given a time and a Schedule expression, calculates the soonest time that matches the expression
 nextInstance :: LocalTime -> Schedule -> LocalTime
-nextInstance time schedule = dueTime (schedule^.scheduleTime) daysThisWeek
+nextInstance time schedule = minimum $ filter (>= time) allPossibleTimes
     where
-        daysThisWeek :: [Day]
-        daysThisWeek = concatMap (weekStartingAt (localDay time)) $ schedule^.scheduleDay
-        dueTime :: Maybe ScheduleTime -> [Day] -> LocalTime
-        dueTime st days = case st of
-                                                                        -- These are all possible LocalTimes
-                            Just schedTime -> minimum $ filter (>= time) $ LocalTime <$> days <*> scheduleTimeToList schedTime
-                            Nothing        -> LocalTime (days!!1) midnight
+        allPossibleTimes = LocalTime <$> instanceOfDaysOfWeek (localDay time) (schedule^.scheduleDay)
+                                     <*> case schedule^.scheduleTime of
+                                           Nothing -> pure midnight
+                                           Just s  -> scheduleTimeToList s
+
+-- |Transforms a list of generic weekdays (e.g. [Monday]) to a list specific ones (e.g. [Monday 13.03.2022]).
+--These are the first occurences of the weekdays on and after a certain day.
+--If the weekday of the given day is part of the list, it will be added twice, one time the day itself and the other time seven days plus the day
+instanceOfDaysOfWeek :: Day -> [DayOfWeek] -> [Day]
+instanceOfDaysOfWeek d ds = prependBool (dayOfWeek d `elem` ds) (firstDayOfWeekAfter (dayOfWeek d) d)
+    $ map (`firstDayOfWeekOnAfter` d) ds
 
 -- |Calculates all possible TimeOfDays that match the ScheduleTime expression
 scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
-scheduleTimeToList st = concat [ takeWhile (<= maxTime start rep) $ iterate (addTimeOfDayStupid rep) start
+scheduleTimeToList st = concat [ iterateN (maxMultiple start rep) (addTimeOfDay rep) start
                                | start <- st^.startTime, rep <- st^.repetitionTime ]
-    where
-        maxTime :: TimeOfDay -> TimeOfDay -> TimeOfDay
-        maxTime time rep = case rep^.todHourL of
-                             0 -> if time^.todMinL + rep^.todMinL < 60 then maxTime (time & todMinL  %~ (+rep^.todMinL)) rep else time
-                             x -> if time^.todHourL + x < 24 then maxTime (addTimeOfDay time rep) rep else time
-        addTimeOfDayStupid :: TimeOfDay -> TimeOfDay -> TimeOfDay
-        addTimeOfDayStupid TimeOfDay{todHour=t1h, todMin=t1m} TimeOfDay{todHour=t2h, todMin=t2m} =
-            TimeOfDay{todHour=t1h+t2h + ((t1m+t2m) `div` 60), todMin=(t1m+t2m) `mod` 60, todSec=0}
+
+-- |For parameters t r, calculates how many times can one add r to t until the next hour/day (r consits only of minutes/r has non zero hour) is reached.
+maxMultiple :: TimeOfDay -> TimeOfDay -> Int
+maxMultiple = maxMultipleH 0
+    where maxMultipleH n time mult =
+            case mult^.todHourL of
+              0 -> if time^.todMinL + mult^.todMinL < 60 then maxMultipleH (n+1) (addTimeOfDay time mult) mult else n
+              x -> let hours = time^.todHourL + mult^.todHourL + ((time^.todMinL + mult^.todMinL) `div` 60) in
+                   if hours < 24 then maxMultipleH (n+1) (addTimeOfDay time mult) mult else n
 
 -- |Addes two TimeOfDays ignoring the seconds
 addTimeOfDay :: TimeOfDay -> TimeOfDay -> TimeOfDay
 addTimeOfDay TimeOfDay{todHour=t1h, todMin=t1m} TimeOfDay{todHour=t2h, todMin=t2m} =
     TimeOfDay{todHour=(t1h+t2h + ((t1m+t2m) `div` 60)) `mod` 24, todMin=(t1m+t2m) `mod` 60, todSec=0}
 
--- |Calculates the first week beginning on a certain day of the week after a certain day
-weekStartingAt :: Day -> DayOfWeek -> [Day]
-weekStartingAt startDay weekDay = take 7 $ iterate succ $ firstDayOfWeekOnAfter weekDay startDay
+firstDayOfWeekAfter :: DayOfWeek -> Day -> Day
+firstDayOfWeekAfter weekday day = firstDayOfWeekOnAfter weekday (addDays 1 day)
+
+prependBool :: Bool -> a -> [a] -> [a]
+prependBool b x xs = if b then x:xs else xs
+
+-- |breakOn '=' "x=1" == ("x","1")
+breakOn :: Eq a => a -> [a] -> ([a],[a])
+breakOn x = break (/= x)
+
+iterateN :: Int -> (a -> a) -> a -> [a]
+iterateN n f x = take n $ iterate f x
