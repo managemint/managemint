@@ -1,3 +1,13 @@
+{- app/Executor.hs
+ -
+ - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
+ -
+ - This program is free software; you can redistribute it and/or modify
+ - it under the terms of the GNU General Public License version 3 as
+ - published by the Free Software Foundation.
+ -
+ -}
+
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 module Executor(AnsiblePlaybook(..), execPlaybook) where
@@ -19,8 +29,9 @@ import System.Directory
 
 import Text.JSON
 import Text.JSON.Generic
-
 import Text.Printf
+
+import Database.Persist.MySQL
 
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html#t:JSON
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
@@ -99,8 +110,8 @@ processAnsibleEvent "task_runner_start" s =
         notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
 processAnsibleEvent e s = return ()
 
-execPlaybook :: AnsiblePlaybook -> IO Bool
-execPlaybook pb = do
+execPlaybook :: ConnectionPool -> AnsiblePlaybook -> IO Bool
+execPlaybook pool pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
         sock <- createBindSocket sockPath
