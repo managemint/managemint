@@ -74,7 +74,7 @@ updateConfigRepoJobTemplates = undefined
 readJobsDatabase :: IO JobTemplates
 readJobsDatabase = undefined
 
--- |Given a list of initial job templates (the ones from the config repo), updates them, reads the user jobs from the databse and executes all due ones
+-- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: JobTemplates -> IO JobTemplates
 runJobs jobTempls = do
     jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
