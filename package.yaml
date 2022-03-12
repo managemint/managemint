@@ -29,18 +29,16 @@ dependencies:
 - yesod-core
 - persistent
 - persistent-mysql >= 2.13.1
-- text
 - monad-logger
 - persistent-template
 - yesod-form
 - lens
-- mtl
-- containers
 - time-compat
+- split
+- containers
+- mtl
+- text
 - Cabal
-- split >= 0.2.3.4
-
-
 
 executables:
   hansible-exe:
