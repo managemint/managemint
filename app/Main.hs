@@ -159,4 +159,3 @@ main = do
             runMigration migrateAll
         _ <- async $ runScheduler pool
         runWebserver pool
-
