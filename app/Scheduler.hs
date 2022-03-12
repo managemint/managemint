@@ -24,6 +24,7 @@ import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
+import qualified Database.Persist.MySQL as MySQL
 
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
@@ -60,14 +61,14 @@ getDueJobs jobs = do
     time <- liftIO getTime
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
-executeJobs :: Jobs -> StateT JobTemplates IO ()
-executeJobs = mapM_ executeJob
+executeJobs :: MySQL.ConnectionPool -> Jobs -> StateT JobTemplates IO ()
+executeJobs cp = mapM_ (executeJob cp)
 
-executeJob :: Job -> StateT JobTemplates IO ()
-executeJob job = do
+executeJob :: MySQL.ConnectionPool -> Job -> StateT JobTemplates IO ()
+executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        success <- liftIO $ execPlaybook AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+        success <- liftIO $ execPlaybook cp AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
@@ -85,9 +86,9 @@ readJobsDatabase :: IO JobTemplates
 readJobsDatabase = undefined
 
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: JobTemplates -> IO JobTemplates
-runJobs jobTempls = do
+runJobs :: MySQL.ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs cp jobTempls = do
     jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs) jobTempls'
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs cp) jobTempls'
 
 schedule = undefined

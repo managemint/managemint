@@ -38,9 +38,7 @@ dependencies:
 - containers
 - mtl
 - text
-
-extra-deps:
-  - Cabal
+- Cabal
 
 executables:
   hansible-exe:
