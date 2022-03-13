@@ -1,9 +1,19 @@
+{- app/Scheduler.hs
+ -
+ - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
+ -
+ - This program is free software; you can redistribute it and/or modify
+ - it under the terms of the GNU General Public License version 3 as
+ - published by the Free Software Foundation.
+ -
+ -}
+
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GADTs #-}
 
 module Scheduler where
 
-import qualified Executor as E
+import Executor
 import ScheduleFormat
 import Config
 import Data.Time.LocalTime.Compat
@@ -14,6 +24,7 @@ import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
+import qualified Database.Persist.MySQL as MySQL
 
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
@@ -50,22 +61,22 @@ getDueJobs jobs = do
     time <- liftIO getTime
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
-executeJobs :: Jobs -> StateT JobTemplates IO ()
-executeJobs = mapM_ executeJob
+executeJobs :: MySQL.ConnectionPool -> Jobs -> StateT JobTemplates IO ()
+executeJobs cp = mapM_ (executeJob cp)
 
-executeJob :: Job -> StateT JobTemplates IO ()
-executeJob job = do
+executeJob :: MySQL.ConnectionPool -> Job -> StateT JobTemplates IO ()
+executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        liftIO $ E.exec E.AnsiblePlaybook{E.path=template `dot` repoPath, E.name=template `dot` playbook, E.tags="", E.limit=""} -- TODO: Add support for tags and limit when Executor has it
-        let success = False -- TODO: Remove
+        success <- liftIO $ execPlaybook cp AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
 
 -- Read Project from Database, look if exisits
---   No  -> Write Failed run in Databse
---   Yes -> Clone/Update Repo
+--   No  -> Write Failed in Project table
+--   Yes -> Clone/Update Repo Write Run with Run status running and pass key to exec 
+--   Delte folder if clone update fail
 --     Parse and fill JobTemplates
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
@@ -74,10 +85,10 @@ updateConfigRepoJobTemplates = undefined
 readJobsDatabase :: IO JobTemplates
 readJobsDatabase = undefined
 
--- |Given a list of initial job templates (the ones from the config repo), updates them, reads the user jobs from the databse and executes all due ones
-runJobs :: JobTemplates -> IO JobTemplates
-runJobs jobTempls = do
+-- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
+runJobs :: MySQL.ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs cp jobTempls = do
     jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs) jobTempls'
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs cp) jobTempls'
 
 schedule = undefined

@@ -1,3 +1,13 @@
+{- app/Main.hs
+ -
+ - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
+ -
+ - This program is free software; you can redistribute it and/or modify
+ - it under the terms of the GNU General Public License version 3 as
+ - published by the Free Software Foundation.
+ -
+ -}
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes       #-}
 {-# LANGUAGE TemplateHaskell   #-}
@@ -26,6 +36,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
     url String
     branch String
+    errorMessage String
     deriving Show
 Playbook
     projectId ProjectId
@@ -51,18 +62,18 @@ JobQueue
 |]
 
 getProjects :: ConnectionPool -> IO [Entity Project]
-getProjects pool = runSqlPool (selectList [] [Asc ProjectId]) pool
+getProjects = runSqlPool (selectList [] [Asc ProjectId])
 
 getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
-getPlaybooks projectid pool = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+getPlaybooks projectid = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId])
 
 addRun :: Key Playbook -> Run -> ConnectionPool -> IO (Key Run)
-addRun playbookid run pool = runSqlPool (insert $ run) pool
+addRun playbookid run = runSqlPool (insert run)
 
 addEvent :: Key Run -> Event -> ConnectionPool -> IO (Key Event)
-addEvent runid event pool = runSqlPool (insert $ event) pool
+addEvent runid event = runSqlPool (insert event)
 
-data App = App { connections :: ConnectionPool }
+newtype App = App { connections :: ConnectionPool }
 
 data AddRepository = AddRepository
         { repoURL :: Text
@@ -73,7 +84,7 @@ addRepoForm = renderDivs $ AddRepository
         <$> areq textField "Repository URL" Nothing
         <*> areq textField "Branch" Nothing
 
-data ButtonForm = ButtonForm
+newtype ButtonForm = ButtonForm
         { hiddenVal :: Int
         }
 
@@ -99,29 +110,34 @@ instance YesodPersist App where
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
 projectWidget (Entity projectid project) pool = do
-    ((resultDeleteRepo, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack ("deleteRepo" ++ (show (fromSqlKey projectid)))) $ buttonForm (fromIntegral (fromSqlKey projectid))
+    ((resultDeleteRepo, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack ("deleteRepo" ++ show (fromSqlKey projectid))) $ buttonForm (fromIntegral (fromSqlKey projectid))
     case resultDeleteRepo of
         FormSuccess (ButtonForm val) -> do
-            (runSqlPool (deleteWhere [ProjectId ==. (toSqlKey (fromIntegral val))]) pool)
+            runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
             [whamlet||]
-        _ -> do
-            playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-            toWidget
-                [whamlet|
-                    <li>
-                        Project: #{projectUrl project} (#{projectBranch project})
-                        <form method=post action=@{HomeR}>
-                            ^{widgetDeleteRepo}
-                            <button>Remove
-                        $forall entity <- playbooks
-                            TestPlaybook
-                |]
+        _ -> case projectErrorMessage project of
+                "" -> do
+                    playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+                    toWidget
+                        [whamlet|
+                            <li>
+                                Project: #{projectUrl project} (#{projectBranch project})
+                                <form method=post action=@{HomeR}>
+                                    ^{widgetDeleteRepo}
+                                    <button>Remove
+                                $forall entity <- playbooks
+                                    TestPlaybook
+                        |]
+                err ->  [whamlet|
+                            <font color="red">
+                                #{err}
+                        |]
 
 getHomeR :: Handler Html
 getHomeR = do
     ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
     case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> (runDB $ insert $ Project (unpack repo) (unpack branch)) >> (pure ())
+        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "") >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
     App pool <- getYesod
