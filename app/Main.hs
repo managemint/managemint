@@ -26,6 +26,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
     url String
     branch String
+    errorMessage String
     deriving Show
 Playbook
     projectId ProjectId
@@ -104,24 +105,29 @@ projectWidget (Entity projectid project) pool = do
         FormSuccess (ButtonForm val) -> do
             runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
             [whamlet||]
-        _ -> do
-            playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-            toWidget
-                [whamlet|
-                    <li>
-                        Project: #{projectUrl project} (#{projectBranch project})
-                        <form method=post action=@{HomeR}>
-                            ^{widgetDeleteRepo}
-                            <button>Remove
-                        $forall entity <- playbooks
-                            TestPlaybook
-                |]
+        _ -> case projectErrorMessage project of
+                "" -> do
+                    playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+                    toWidget
+                        [whamlet|
+                            <li>
+                                Project: #{projectUrl project} (#{projectBranch project})
+                                <form method=post action=@{HomeR}>
+                                    ^{widgetDeleteRepo}
+                                    <button>Remove
+                                $forall entity <- playbooks
+                                    TestPlaybook
+                        |]
+                err ->  [whamlet|
+                            <font color="red">
+                                #{err}
+                        |]
 
 getHomeR :: Handler Html
 getHomeR = do
     ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
     case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch)) >> pure ()
+        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "") >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
     App pool <- getYesod
