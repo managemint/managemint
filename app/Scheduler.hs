@@ -13,6 +13,8 @@
 
 module Scheduler where
 
+import Main
+import Git
 import Executor
 import ScheduleFormat
 import Config
@@ -24,7 +26,8 @@ import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
-import qualified Database.Persist.MySQL as MySQL
+import Control.Monad.Trans.Reader
+import Database.Persist.MySQL hiding (get)
 
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
@@ -54,17 +57,17 @@ calculateNextInstances = do
     return $ map (calculateNextInstance time) $ M.toList templates
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
-calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.schedule), _templateName = name}
+calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.scheduleFormat), _templateName = name}
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
     time <- liftIO getTime
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
-executeJobs :: MySQL.ConnectionPool -> Jobs -> StateT JobTemplates IO ()
+executeJobs :: ConnectionPool -> Jobs -> StateT JobTemplates IO ()
 executeJobs cp = mapM_ (executeJob cp)
 
-executeJob :: MySQL.ConnectionPool -> Job -> StateT JobTemplates IO ()
+executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
@@ -80,15 +83,36 @@ executeJob cp job = do
 --     Parse and fill JobTemplates
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
-updateConfigRepoJobTemplates = undefined
+updateConfigRepoJobTemplates _ = do
+    return $ M.fromList [("asd", JobTemplate{_scheduleFormat=now, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
+        where now=  Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
-readJobsDatabase :: IO JobTemplates
-readJobsDatabase = undefined
+-- TODO: Playbook mithilfe des foreign key auslesen und daraus Job erstellen
+-- TODO: Falls Project fuer Job als failed markiert ist, kein JobTemplate erstellen und auch ?nicht aus der Datenbank loeschen
+readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
+readJobsDatabase = do
+    --jobsRaw <- getDatabaseJobQueue
+    --removeDatabseJobQueue $ map entityKey jobsRaw
+    return M.empty
+
+getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
+getJobPlaybook playId = do
+    --let a = getBy playId :: ReaderT SqlBackend IO (Maybe (Entity Playbook))
+    head <$> selectList [PlaybookId ==. playId] [] --TODO: Is this list never empty?
+
+getDatabaseJobQueue ::  ReaderT SqlBackend IO [Entity JobQueue]
+getDatabaseJobQueue = selectList [] [Asc JobQueueId]
+
+removeDatabseJobQueue :: [Key JobQueue] -> ReaderT SqlBackend IO ()
+removeDatabseJobQueue = mapM_ delete
 
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: MySQL.ConnectionPool -> JobTemplates -> IO JobTemplates
-runJobs cp jobTempls = do
-    jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs cp) jobTempls'
+runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs pool jobTempls = do
+    jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> runSqlPool readJobsDatabase pool
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
-schedule = undefined
+schedule :: ConnectionPool -> IO ()
+schedule pool = do
+    jt <- runJobs pool M.empty
+    return ()

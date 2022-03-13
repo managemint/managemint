@@ -39,6 +39,7 @@ dependencies:
 - mtl
 - text
 - Cabal
+- transformers
 
 executables:
   hansible-exe:

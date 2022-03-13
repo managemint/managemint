@@ -36,6 +36,7 @@ share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
     url String
     branch String
+    status Int
     deriving Show
 Playbook
     projectId ProjectId
