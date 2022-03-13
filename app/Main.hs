@@ -51,18 +51,18 @@ JobQueue
 |]
 
 getProjects :: ConnectionPool -> IO [Entity Project]
-getProjects pool = runSqlPool (selectList [] [Asc ProjectId]) pool
+getProjects = runSqlPool (selectList [] [Asc ProjectId])
 
 getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
-getPlaybooks projectid pool = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+getPlaybooks projectid = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId])
 
 addRun :: Key Playbook -> Run -> ConnectionPool -> IO (Key Run)
-addRun playbookid run pool = runSqlPool (insert $ run) pool
+addRun playbookid run = runSqlPool (insert run)
 
 addEvent :: Key Run -> Event -> ConnectionPool -> IO (Key Event)
-addEvent runid event pool = runSqlPool (insert $ event) pool
+addEvent runid event = runSqlPool (insert event)
 
-data App = App { connections :: ConnectionPool }
+newtype App = App { connections :: ConnectionPool }
 
 data AddRepository = AddRepository
         { repoURL :: Text
@@ -73,7 +73,7 @@ addRepoForm = renderDivs $ AddRepository
         <$> areq textField "Repository URL" Nothing
         <*> areq textField "Branch" Nothing
 
-data ButtonForm = ButtonForm
+newtype ButtonForm = ButtonForm
         { hiddenVal :: Int
         }
 
@@ -99,10 +99,10 @@ instance YesodPersist App where
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
 projectWidget (Entity projectid project) pool = do
-    ((resultDeleteRepo, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack ("deleteRepo" ++ (show (fromSqlKey projectid)))) $ buttonForm (fromIntegral (fromSqlKey projectid))
+    ((resultDeleteRepo, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack ("deleteRepo" ++ show (fromSqlKey projectid))) $ buttonForm (fromIntegral (fromSqlKey projectid))
     case resultDeleteRepo of
         FormSuccess (ButtonForm val) -> do
-            (runSqlPool (deleteWhere [ProjectId ==. (toSqlKey (fromIntegral val))]) pool)
+            runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
             [whamlet||]
         _ -> do
             playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
@@ -121,7 +121,7 @@ getHomeR :: Handler Html
 getHomeR = do
     ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
     case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> (runDB $ insert $ Project (unpack repo) (unpack branch)) >> (pure ())
+        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch)) >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
     App pool <- getYesod
