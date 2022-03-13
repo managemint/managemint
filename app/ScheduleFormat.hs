@@ -10,7 +10,7 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext) where
+module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay) where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
@@ -46,7 +46,7 @@ instance Show Schedule where --TODO: Debugging purpose, remove or change!!
     show s = intercalate "," (map show (s^.scheduleDay)) ++ " " ++ maybe [] show (s^.scheduleTime)
 
 allFullHours :: [TimeOfDay]
-allFullHours = take 12 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
+allFullHours = take 24 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
 
 fullWeek :: [DayOfWeek]
 fullWeek = enumFromTo Monday Sunday

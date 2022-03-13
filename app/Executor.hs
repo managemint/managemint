@@ -15,7 +15,7 @@ module Executor(AnsiblePlaybook(..), execPlaybook) where
 import Ansible
 import Sock
 import Config
-import Main
+import DatabaseUtil
 
 import Foreign.C.Types
 import Foreign.C.String

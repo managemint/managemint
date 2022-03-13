@@ -13,7 +13,7 @@
 
 module Scheduler (schedule) where
 
-import Main
+import DatabaseUtil
 import Git
 import Executor
 import ScheduleFormat
@@ -29,9 +29,11 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Reader
 import Database.Persist.MySQL hiding (get)
 
+-- TODO: Implement prettier instance of Show
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
+    deriving (Show)
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
-    deriving (Eq)
+    deriving (Eq, Show)
 
 type JobTemplates = M.Map String JobTemplate
 type Jobs = [Job]
@@ -41,6 +43,7 @@ instance Ord Job where
 
 makeLenses ''Job
 makeLenses ''JobTemplate
+makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
 getTime :: IO LocalTime
 getTime = do
@@ -48,12 +51,11 @@ getTime = do
     timezone <- getCurrentTimeZone
     return $ utcToLocalTime timezone now
 
--- |Calculates the next job instances form the templates and removes the user job templates
+-- |Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
 calculateNextInstances = do
     templates <- get
     time <- liftIO getTime
-    modify $ M.filter (^. systemJob)
     return $ map (calculateNextInstance time) $ M.toList templates
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
@@ -61,17 +63,21 @@ calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (tem
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
-    time <- liftIO getTime
+    time <- liftIO getTime <&> (& localTimeOfDayL %~ (`addTimeOfDay` TimeOfDay{todHour=0,todMin=1,todSec=0})) -- Rounds to the next second
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
+-- |Executes the jobs and removes the user jobs from the job templates
 executeJobs :: ConnectionPool -> Jobs -> StateT JobTemplates IO ()
-executeJobs cp = mapM_ (executeJob cp)
+executeJobs pool jobs = do
+    mapM_ (executeJob pool) jobs
+    modify $ M.filter (^. systemJob)
 
 executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        runKey <- liftIO $ addRun undefined (Run undefined 1 "Hi Paul") cp --TODO: Remove only for testing
+        time <- liftIO getTime
+        runKey <- liftIO $ addRun undefined (Run 1 (show time)) cp --TODO: Remove only for testing
         success <- liftIO $ execPlaybook cp runKey AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
@@ -85,7 +91,7 @@ executeJob cp job = do
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates _ = do
-    return $ M.fromList [("asd", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
+    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
 
 -- TODO: Playbook mithilfe des foreign key auslesen und daraus Job erstellen
 -- TODO: Falls Project fuer Job als failed markiert ist, kein JobTemplate erstellen und auch ?nicht aus der Datenbank loeschen

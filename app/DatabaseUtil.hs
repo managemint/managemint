@@ -38,7 +38,7 @@ Playbook
     playbookName String
     hosts String
 Run
-    playbookId PlaybookId
+--    playbookId PlaybookId
     status Int
     triggerdate String
 Event
