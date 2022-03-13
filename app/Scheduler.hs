@@ -11,7 +11,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GADTs #-}
 
-module Scheduler where
+module Scheduler (schedule) where
 
 import Main
 import Git
@@ -71,7 +71,8 @@ executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        success <- liftIO $ execPlaybook cp AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+        runKey <- liftIO $ addRun undefined (Run undefined 1 "Hi Paul") cp --TODO: Remove only for testing
+        success <- liftIO $ execPlaybook cp runKey AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
@@ -84,16 +85,19 @@ executeJob cp job = do
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates _ = do
-    return $ M.fromList [("asd", JobTemplate{_scheduleFormat=now, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
-        where now=  Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
+    return $ M.fromList [("asd", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
 
 -- TODO: Playbook mithilfe des foreign key auslesen und daraus Job erstellen
 -- TODO: Falls Project fuer Job als failed markiert ist, kein JobTemplate erstellen und auch ?nicht aus der Datenbank loeschen
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
-    --jobsRaw <- getDatabaseJobQueue
+    --jobsRaw <- getDatabaseJobQueue >>= removeIllegalJobs
     --removeDatabseJobQueue $ map entityKey jobsRaw
     return M.empty
+
+-- |Removes all Jobs whose Project is marked as failed
+removeIllegalJobs :: [Entity JobQueue] -> ReaderT SqlBackend IO [Entity JobQueue]
+removeIllegalJobs = undefined
 
 getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
 getJobPlaybook playId = do
@@ -109,10 +113,10 @@ removeDatabseJobQueue = mapM_ delete
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
 runJobs pool jobTempls = do
-    jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> runSqlPool readJobsDatabase pool
+    jobTempls' <- M.union <$> updateConfigRepoJobTemplates jobTempls <*> runSqlPool readJobsDatabase pool
     snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
 schedule :: ConnectionPool -> IO ()
 schedule pool = do
     jt <- runJobs pool M.empty
-    return ()
+    return () -- TODO: Change only for Testing

@@ -10,7 +10,7 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, allFullHours, fullWeek) where
+module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext) where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
@@ -50,6 +50,9 @@ allFullHours = take 12 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) 
 
 fullWeek :: [DayOfWeek]
 fullWeek = enumFromTo Monday Sunday
+
+scheduleNext :: Schedule
+scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
 parseDaysFormat :: String -> Maybe [DayOfWeek]
 parseDaysFormat "" = Just $ enumFromTo Monday Sunday
