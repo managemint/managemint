@@ -15,6 +15,7 @@ module Executor(AnsiblePlaybook(..), execPlaybook) where
 import Ansible
 import Sock
 import Config
+import Main
 
 import Foreign.C.Types
 import Foreign.C.String
@@ -32,6 +33,7 @@ import Text.JSON.Generic
 import Text.Printf
 
 import Database.Persist.MySQL
+import Database.Persist
 
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html#t:JSON
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
@@ -92,8 +94,9 @@ newtype AnsibleEvent = AnsibleEvent
 -- TODO put in /run
 sockPath = executorSockPath
 
-notifyDatabase :: AnsibleRunnerResult -> IO ()
-notifyDatabase arr = do
+notifyDatabase :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
+notifyDatabase arr pool rid = do
+        runSqlPool (insert $ Event (taskARR arr) (hostARR arr) rid (is_changed arr) (is_skipped arr) (is_failed arr) (is_unreachable arr) "NI") pool
         printf "Result: %s, F: %s UR: %s SK: %s\n"
             (taskARR arr) (show $ is_failed arr)
             (show $ is_unreachable arr) (show $ is_skipped arr)
@@ -103,15 +106,15 @@ notifyScheduler ars = do
         printf "Start: %s, Host: %s\n"
             (taskARS ars) (hostARS ars)
 
-processAnsibleEvent :: String -> String -> IO ()
-processAnsibleEvent "task_runner_result" s =
-        notifyDatabase (decodeJSON s :: AnsibleRunnerResult)
-processAnsibleEvent "task_runner_start" s =
+processAnsibleEvent :: String -> String -> ConnectionPool -> RunId -> IO ()
+processAnsibleEvent "task_runner_result" s pool rid =
+        notifyDatabase (decodeJSON s :: AnsibleRunnerResult) pool rid
+processAnsibleEvent "task_runner_start" s pool rid =
         notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
-processAnsibleEvent e s = return ()
+processAnsibleEvent e s p r = return ()
 
-execPlaybook :: ConnectionPool -> AnsiblePlaybook -> IO Bool
-execPlaybook pool pb = do
+execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
+execPlaybook pool rid pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
 
         sock <- createBindSocket sockPath
@@ -121,7 +124,7 @@ execPlaybook pool pb = do
             -- Poll pb-thread
             callbackRaw <- readSocket sock
             let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
-            processAnsibleEvent (event callbackAE) callbackRaw
+            processAnsibleEvent (event callbackAE) callbackRaw pool rid
 
         ret <- wait pb
 
