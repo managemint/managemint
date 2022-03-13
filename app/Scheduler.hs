@@ -28,6 +28,7 @@ import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
 import Database.Persist.MySQL hiding (get)
+import qualified Database.Persist.MySQL as MySQL (get)
 
 -- TODO: Implement prettier instance of Show
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
@@ -93,28 +94,38 @@ updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates _ = do
     return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
 
--- TODO: Playbook mithilfe des foreign key auslesen und daraus Job erstellen
--- TODO: Falls Project fuer Job als failed markiert ist, kein JobTemplate erstellen und auch ?nicht aus der Datenbank loeschen
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
-    --jobsRaw <- getDatabaseJobQueue >>= removeIllegalJobs
-    --removeDatabseJobQueue $ map entityKey jobsRaw
-    return M.empty
+    dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
+    let templs = zipWith createUserTemplate (map (entityVal.snd3) dataJoin) (map (entityVal.thr3) dataJoin)
+    mapM_ (delete . entityKey . fst3) dataJoin
+    return $ M.fromList $ zip ["USERTEMPLATE" ++ show n | n <- [0..]] templs -- TODO: Parser is not allowed to parse a config name starting with "USERTEMPLATE"
 
--- |Removes all Jobs whose Project is marked as failed
-removeIllegalJobs :: [Entity JobQueue] -> ReaderT SqlBackend IO [Entity JobQueue]
-removeIllegalJobs = undefined
+createUserTemplate :: Playbook -> Project -> JobTemplate
+createUserTemplate play proj = JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl proj, _playbook=playbookPlaybookName play, _failCount=0, _systemJob=False}
 
-getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
-getJobPlaybook playId = do
-    --let a = getBy playId :: ReaderT SqlBackend IO (Maybe (Entity Playbook))
-    head <$> selectList [PlaybookId ==. playId] [] --TODO: Is this list never empty?
+projectUrlToPath :: String -> String
+projectUrlToPath = undefined
 
 getDatabaseJobQueue ::  ReaderT SqlBackend IO [Entity JobQueue]
 getDatabaseJobQueue = selectList [] [Asc JobQueueId]
 
-removeDatabseJobQueue :: [Key JobQueue] -> ReaderT SqlBackend IO ()
-removeDatabseJobQueue = mapM_ delete
+joinJobQueuePlaybookProject :: ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
+joinJobQueuePlaybookProject = do
+    jobs <- selectList [] [Asc JobQueueId]
+    playbooks <- mapM (getJobPlaybook . jobQueuePlaybookId . entityVal) jobs
+    projects  <- mapM (getPlaybookProject . playbookProjectId . entityVal) playbooks
+    return $ zip3 jobs playbooks projects
+
+-- |Removes all Jobs whose Project is marked as failed
+removeIllegalJobs :: [(Entity JobQueue, Entity Playbook, Entity Project)] -> ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
+removeIllegalJobs = undefined
+
+getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
+getJobPlaybook playId = head <$> selectList [PlaybookId ==. playId] [] --TODO can one asume the list to be nonempty?
+
+getPlaybookProject :: ProjectId -> ReaderT SqlBackend IO (Entity Project)
+getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] [] --TODO: like above
 
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
@@ -126,3 +137,12 @@ schedule :: ConnectionPool -> IO ()
 schedule pool = do
     jt <- runJobs pool M.empty
     return () -- TODO: Change only for Testing
+
+fst3 :: (a,b,c) -> a
+fst3 (a,_,_) = a
+
+snd3 :: (a,b,c) -> b
+snd3 (_,b,_) = b
+
+thr3 :: (a,b,c) -> c
+thr3 (_,_,c) = c
