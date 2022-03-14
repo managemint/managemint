@@ -106,19 +106,20 @@ updateConfigRepoJobTemplates pool templ = do
 
 createSystemTemplate :: ConnectionPool -> Entity Project -> IO JobTemplates
 createSystemTemplate pool project = do
-    catch (getRepo path url branch) (markProjectFailed pool (entityKey project)) --TODO: If execption occures, return empty Map and if not, set ProjectErrorMessage to ""
-    readAndParseConfigFile path project
+    success <- catch (getRepo path url branch >> return True) (markProjectFailed pool (entityKey project))
+    if success then runSqlPool (update (entityKey project) [ProjectErrorMessage =. ""]) pool >> readAndParseConfigFile path project
+               else return M.empty
         where
             url = projectUrl $ entityVal project
             path = projectUrlToPath url
             branch = projectBranch $ entityVal project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
-readAndParseConfigFile :: String -> Entity Project -> IO JobTemplates
+readAndParseConfigFile :: FilePath -> Entity Project -> IO JobTemplates
 readAndParseConfigFile _ _ = return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False, _repoIdentifier=""})]
 
-markProjectFailed :: ConnectionPool -> Key Project -> GitException -> IO ()
-markProjectFailed pool key e = runSqlPool (update key [ProjectErrorMessage =. show e]) pool
+markProjectFailed :: ConnectionPool -> Key Project -> GitException -> IO Bool
+markProjectFailed pool key e = runSqlPool (update key [ProjectErrorMessage =. show e]) pool >> return False
 
 getRepo :: String -> String -> String -> IO ()
 getRepo path url branch =
