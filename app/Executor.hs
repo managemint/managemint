@@ -87,6 +87,12 @@ hostARR = host
 taskARR :: AnsibleRunnerResult -> String
 taskARR = task
 
+taskIdARR :: AnsibleRunnerResult -> String
+taskIdARR = task_id
+
+playARR :: AnsibleRunnerResult -> String
+taskIdARR = task_id
+
 newtype AnsibleEvent = AnsibleEvent
     { event :: String
     } deriving (Show, Data)
