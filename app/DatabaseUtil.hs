@@ -45,7 +45,7 @@ Event
     task String
     task_id Int
     play String
-    play_id String
+    play_id Int
     host String
     runId RunId
     is_changed Bool
