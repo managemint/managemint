@@ -14,5 +14,6 @@ module Config where
 sockReadLen :: Int
 sockReadLen = 2048
 schedulerFailMax = 3 :: Int
+schedulerUserTemplateKey = "USERTEMPLATE" -- Parser is not allowed to parse a job name starting with this string
 
 executorSockPath = "/tmp/hansible.sock"

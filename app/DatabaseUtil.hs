@@ -67,11 +67,11 @@ getProjects = runSqlPool (selectList [] [Asc ProjectId])
 getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
 getPlaybooks projectid = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId])
 
-addRun :: Key Playbook -> Run -> ConnectionPool -> IO (Key Run)
-addRun playbookid run = runSqlPool (insert run)
+addRun :: Run -> ConnectionPool -> IO (Key Run)
+addRun run = runSqlPool (insert run)
 
-addEvent :: Key Run -> Event -> ConnectionPool -> IO (Key Event)
-addEvent runid event = runSqlPool (insert event)
+addEvent :: Event -> ConnectionPool -> IO (Key Event)
+addEvent event = runSqlPool (insert event)
 
 newtype App = App { connections :: ConnectionPool }
 
