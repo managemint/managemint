@@ -15,7 +15,7 @@ module Executor(AnsiblePlaybook(..), execPlaybook) where
 import Ansible
 import Sock
 import Config
-import Main
+import DatabaseUtil
 
 import Foreign.C.Types
 import Foreign.C.String
@@ -87,6 +87,15 @@ hostARR = host
 taskARR :: AnsibleRunnerResult -> String
 taskARR = task
 
+taskIdARR :: AnsibleRunnerResult -> Int
+taskIdARR = task_id
+
+playARR :: AnsibleRunnerResult -> String
+playARR = play
+
+playIdARR :: AnsibleRunnerResult -> Int
+playIdARR = play_id
+
 newtype AnsibleEvent = AnsibleEvent
     { event :: String
     } deriving (Show, Data)
@@ -96,7 +105,11 @@ sockPath = executorSockPath
 
 notifyDatabase :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
 notifyDatabase arr pool rid = do
-        runSqlPool (insert $ Event (taskARR arr) (hostARR arr) rid (is_changed arr) (is_skipped arr) (is_failed arr) (is_unreachable arr) "NI") pool
+        runSqlPool (insert $ Event (taskARR arr) (taskIdARR arr) (playARR arr)
+            (playIdARR arr) (hostARR arr) rid (is_changed arr) (is_skipped arr)
+            (is_failed arr) (is_unreachable arr) (is_item arr) (item arr)
+            "Output not implemented") pool
+
         printf "Result: %s, F: %s UR: %s SK: %s\n"
             (taskARR arr) (show $ is_failed arr)
             (show $ is_unreachable arr) (show $ is_skipped arr)

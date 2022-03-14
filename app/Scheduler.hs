@@ -11,8 +11,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GADTs #-}
 
-module Scheduler where
+module Scheduler (schedule) where
 
+import DatabaseUtil
+import Git
 import Executor
 import ScheduleFormat
 import Config
@@ -24,11 +26,15 @@ import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
-import qualified Database.Persist.MySQL as MySQL
+import Control.Monad.Trans.Reader
+import Database.Persist.MySQL hiding (get)
+import qualified Database.Persist.MySQL as MySQL (get)
 
+-- TODO: Implement prettier instance of Show
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool}
+    deriving (Show)
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
-    deriving (Eq)
+    deriving (Eq, Show)
 
 type JobTemplates = M.Map String JobTemplate
 type Jobs = [Job]
@@ -38,6 +44,7 @@ instance Ord Job where
 
 makeLenses ''Job
 makeLenses ''JobTemplate
+makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
 getTime :: IO LocalTime
 getTime = do
@@ -45,30 +52,34 @@ getTime = do
     timezone <- getCurrentTimeZone
     return $ utcToLocalTime timezone now
 
--- |Calculates the next job instances form the templates and removes the user job templates
+-- |Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
 calculateNextInstances = do
     templates <- get
     time <- liftIO getTime
-    modify $ M.filter (^. systemJob)
     return $ map (calculateNextInstance time) $ M.toList templates
 
 calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
-calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.schedule), _templateName = name}
+calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.scheduleFormat), _templateName = name}
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
-    time <- liftIO getTime
+    time <- liftIO getTime <&> (& localTimeOfDayL %~ (`addTimeOfDay` TimeOfDay{todHour=0,todMin=1,todSec=0})) -- Rounds to the next second
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
-executeJobs :: MySQL.ConnectionPool -> Jobs -> StateT JobTemplates IO ()
-executeJobs cp = mapM_ (executeJob cp)
+-- |Executes the jobs and removes the user jobs from the job templates
+executeJobs :: ConnectionPool -> Jobs -> StateT JobTemplates IO ()
+executeJobs pool jobs = do
+    mapM_ (executeJob pool) jobs
+    modify $ M.filter (^. systemJob)
 
-executeJob :: MySQL.ConnectionPool -> Job -> StateT JobTemplates IO ()
+executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob cp job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        success <- liftIO $ execPlaybook cp AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+        time <- liftIO getTime
+        runKey <- liftIO $ addRun undefined (Run 1 (show time)) cp --TODO: Remove only for testing
+        success <- liftIO $ execPlaybook cp runKey AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
@@ -80,15 +91,59 @@ executeJob cp job = do
 --     Parse and fill JobTemplates
 --       Failed to parse -> Write Failed run in Databse
 updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
-updateConfigRepoJobTemplates = undefined
+updateConfigRepoJobTemplates _ = do
+    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False})]  -- TODO: Remove this is for testing
 
-readJobsDatabase :: IO JobTemplates
-readJobsDatabase = undefined
+readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
+readJobsDatabase = do
+--    dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
+--    let templs = zipWith createUserTemplate (map (entityVal.snd3) dataJoin) (map (entityVal.thr3) dataJoin)
+--    mapM_ (delete . entityKey . fst3) dataJoin
+--    return $ M.fromList $ zip ["USERTEMPLATE" ++ show n | n <- [0..]] templs -- TODO: Parser is not allowed to parse a config name starting with "USERTEMPLATE"
+    return M.empty
+
+createUserTemplate :: Playbook -> Project -> JobTemplate
+createUserTemplate play proj = JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl proj, _playbook=playbookPlaybookName play, _failCount=0, _systemJob=False}
+
+projectUrlToPath :: String -> String
+projectUrlToPath = undefined
+
+getDatabaseJobQueue ::  ReaderT SqlBackend IO [Entity JobQueue]
+getDatabaseJobQueue = selectList [] [Asc JobQueueId]
+
+joinJobQueuePlaybookProject :: ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
+joinJobQueuePlaybookProject = do
+    jobs <- selectList [] [Asc JobQueueId]
+    playbooks <- mapM (getJobPlaybook . jobQueuePlaybookId . entityVal) jobs
+    projects  <- mapM (getPlaybookProject . playbookProjectId . entityVal) playbooks
+    return $ zip3 jobs playbooks projects
+
+-- |Removes all Jobs whose Project is marked as failed
+removeIllegalJobs :: [(Entity JobQueue, Entity Playbook, Entity Project)] -> ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
+removeIllegalJobs = undefined
+
+getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
+getJobPlaybook playId = head <$> selectList [PlaybookId ==. playId] [] --TODO can one asume the list to be nonempty?
+
+getPlaybookProject :: ProjectId -> ReaderT SqlBackend IO (Entity Project)
+getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] [] --TODO: like above
 
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: MySQL.ConnectionPool -> JobTemplates -> IO JobTemplates
-runJobs cp jobTempls = do
-    jobTempls' <- mappend <$> updateConfigRepoJobTemplates jobTempls <*> readJobsDatabase    -- somehow (++) doesn't work, therefore I used mappend
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs cp) jobTempls'
+runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs pool jobTempls = do
+    jobTempls' <- M.union <$> updateConfigRepoJobTemplates jobTempls <*> runSqlPool readJobsDatabase pool
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
-schedule = undefined
+schedule :: ConnectionPool -> IO ()
+schedule pool = do
+    jt <- runJobs pool M.empty
+    return () -- TODO: Change only for Testing
+
+fst3 :: (a,b,c) -> a
+fst3 (a,_,_) = a
+
+snd3 :: (a,b,c) -> b
+snd3 (_,b,_) = b
+
+thr3 :: (a,b,c) -> c
+thr3 (_,_,c) = c

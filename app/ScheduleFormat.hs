@@ -10,7 +10,7 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat (Schedule (..), nextInstance) where
+module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay) where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
@@ -46,9 +46,16 @@ instance Show Schedule where --TODO: Debugging purpose, remove or change!!
     show s = intercalate "," (map show (s^.scheduleDay)) ++ " " ++ maybe [] show (s^.scheduleTime)
 
 allFullHours :: [TimeOfDay]
-allFullHours = take 12 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
+allFullHours = take 24 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
+
+fullWeek :: [DayOfWeek]
+fullWeek = enumFromTo Monday Sunday
+
+scheduleNext :: Schedule
+scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
 parseDaysFormat :: String -> Maybe [DayOfWeek]
+parseDaysFormat "" = Just $ enumFromTo Monday Sunday
 parseDaysFormat ds = nubOrd . concat <$> mapM parseEnumDays (splitOn "," ds)
     where
         parseEnumDays :: String -> Maybe [DayOfWeek]
@@ -91,7 +98,7 @@ scheduleTimeToList st = concat [ iterateN (maxMultiple start rep) (addTimeOfDay 
 
 -- |For parameters t r, calculates how many times can one add r to t until the next hour/day (r consits only of minutes/r has non zero hour) is reached.
 maxMultiple :: TimeOfDay -> TimeOfDay -> Int
-maxMultiple = maxMultipleH 0
+maxMultiple = maxMultipleH 1
     where maxMultipleH n time mult =
             case mult^.todHourL of
               0 -> if time^.todMinL + mult^.todMinL < 60 then maxMultipleH (n+1) (addTimeOfDay time mult) mult else n

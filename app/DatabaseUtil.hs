@@ -38,17 +38,22 @@ Playbook
     playbookName String
     hosts String
 Run
-    playbookId PlaybookId
+--    playbookId PlaybookId
     status Int
     triggerdate String
 Event
-    name String
+    task String
+    task_id Int
+    play String
+    play_id Int
     host String
     runId RunId
     is_changed Bool
     is_skipped Bool
     is_failed Bool
     is_unreachable Bool
+    is_item Bool
+    item String
     output String
 JobQueue
     playbookId PlaybookId

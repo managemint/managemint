@@ -22,6 +22,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
+import Scheduler
 import Data.Text
 import Yesod
 import DatabaseUtil
@@ -121,13 +122,10 @@ connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
                                     , connectDatabase = "hansible"
                                     }
 
-runScheduler :: ConnectionPool -> IO ()
-runScheduler _ = pure ()
-
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
         flip runSqlPersistMPool pool $ do
             runMigration migrateAll
-        _ <- async $ runScheduler pool
+        _ <- async $ schedule pool
         runWebserver pool
