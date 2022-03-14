@@ -29,6 +29,7 @@ import Control.Monad.Trans
 import Control.Monad.Trans.Reader
 import Database.Persist.MySQL hiding (get)
 import qualified Database.Persist.MySQL as MySQL (get)
+import System.Directory
 
 -- TODO: Implement prettier instance of Show
 data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
@@ -91,9 +92,19 @@ executeJob pool job = do
 --   Delte folder if clone update fail
 --     Parse and fill JobTemplates
 --       Failed to parse -> Write Failed run in Databse
-updateConfigRepoJobTemplates :: JobTemplates -> IO JobTemplates
-updateConfigRepoJobTemplates _ = do
+updateConfigRepoJobTemplates :: ConnectionPool -> JobTemplates -> IO JobTemplates
+updateConfigRepoJobTemplates pool templ = do
+    projects <- getProjects pool
     return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False, _repoIdentifier=""})]  -- TODO: Remove this is for testing
+
+createAndFillFolder :: String -> String -> IO (Either String Bool)
+createAndFillFolder url branch = do
+    andM [doesDirectoryExist path, (==0) <$> isRepo path url, (==0) <$> doPull url branch]
+        >>= \b -> if b then return (Right True)
+                       else (\i -> if i==0 then Right True else Left "") <$> (createDirectory path >> doClone path url branch) --TODO Change
+        where path = projectUrlToPath url
+
+
 
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
@@ -103,12 +114,12 @@ readJobsDatabase = do
     return $ M.fromList $ zip [schedulerUserTemplateKey ++ show n | n <- [0..]] templs
 
 createUserTemplate :: Playbook -> Project -> JobTemplate
-createUserTemplate play proj = 
+createUserTemplate play proj =
     JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl proj, _playbook=playbookPlaybookName play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
 projectUrlToPath :: String -> FilePath
-projectUrlToPath = removeGitSuffix . after ':'
+projectUrlToPath = removeGitSuffix . after '/'
     where
         removeGitSuffix = reverse . after '.' . reverse
 
@@ -135,7 +146,7 @@ getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
 runJobs pool jobTempls = do
-    jobTempls' <- M.union <$> updateConfigRepoJobTemplates jobTempls <*> runSqlPool readJobsDatabase pool
+    jobTempls' <- M.union <$> updateConfigRepoJobTemplates pool jobTempls <*> runSqlPool readJobsDatabase pool
     snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
 schedule :: ConnectionPool -> IO ()
@@ -149,6 +160,10 @@ after :: Eq a => a -> [a] -> [a]
 after x xs = case dropWhile (/= x) xs of
           []  -> []
           xs' -> tail xs'
+
+andM :: Monad m => [m Bool] -> m Bool
+andM []     = return True
+andM (b:bs) = b >>= \b -> if not b then return False else andM bs
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
