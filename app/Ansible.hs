@@ -20,13 +20,7 @@ foreign import ccall "ansible.h ansible" c_ansible :: CString -> CString -> CStr
 
 ansiblePlaybook :: String -> String -> String -> String -> IO Int
 ansiblePlaybook _path _pb _limit _tag = do
-        path <- newCAString _path
-        pb <- newCAString _pb
-        limit <- newCAString _limit
-        tag <- newCAString _tag
+        arg@[path, pb, limit, tag] <- mapM newCAString [_path, _pb, _limit, _tag]
         ret <- c_ansible path pb limit tag
-        free path
-        free pb
-        free limit
-        free tag
+        mapM_ free arg
         return ret

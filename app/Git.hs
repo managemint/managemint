@@ -32,33 +32,25 @@ foreign import ccall "git.h get_last_merge_oid" c_get_last_merge_oid :: IO CStri
 -- Arguments: Target path, Repo URL
 isRepo :: String -> String -> IO Int
 isRepo _path _url = do
-    path <- newCString _path
-    url  <- newCString _url
+    arg@[path, url] <- mapM newCAString [_path, _url]
     ret <- c_is_repo path url
-    free path
-    free url
+    mapM_ free arg
     return ret
 
 -- Args: Repo URL, target path, refspec (branch)
 doClone :: String -> String -> String -> IO Int
 doClone _url _path _refspec = do
-    path <- newCString _path
-    url  <- newCString _url
-    refspec <- newCString _refspec
+    arg@[path, url, refspec] <- mapM newCAString [_path, _url, _refspec]
     ret <- c_do_git_clone url path refspec
-    free path
-    free url
-    free refspec
+    mapM_ free arg
     return ret
 
 -- Args: local repo path, refspec (branch)
 doPull :: String -> String -> IO Int
 doPull _path _refspec = do
-    path  <- newCString _path
-    refspec <- newCString _refspec
+    arg@[path, refspec] <- mapM newCAString [_path, _refspec]
     ret <- c_do_git_pull path refspec
-    free path
-    free refspec
+    mapM_ free arg
     return ret
 
 getLastOid :: IO String
