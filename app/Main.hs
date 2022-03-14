@@ -21,6 +21,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 import Scheduler
 import Data.Text
@@ -30,6 +31,7 @@ import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
 import Control.Monad.Logger (runStderrLoggingT)
+import Control.Monad.Reader
 import Control.Concurrent.Async
 
 data AddRepository = AddRepository
@@ -64,6 +66,15 @@ instance YesodPersist App where
         App pool <- getYesod
         runSqlPool action pool
 
+getAllPlayIds :: Key Run -> ConnectionPool -> IO [String]
+getAllPlayIds run pool = do
+    xs <- runSqlPool (rawSql "SELECT DISTINCT event.play_id FROM event WHERE event.runId=?" [toPersistValue run] :: ReaderT SqlBackend IO [Single Text]) pool
+    pure (Prelude.map (unpack.unSingle) xs)
+
+getAllTaskIds :: Key Run -> Int -> ConnectionPool -> IO [String]
+getAllTaskIds run play pool = do
+    xs <- runSqlPool (rawSql "SELECT DISTINCT event.task_id FROM event WHERE event.runId=? AND event.play_id=?" [toPersistValue run, toPersistValue play] :: ReaderT SqlBackend IO [Single Text]) pool
+    pure (Prelude.map (unpack.unSingle) xs)
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
 projectWidget (Entity projectid project) pool = do
