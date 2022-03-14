@@ -29,18 +29,41 @@ foreign import ccall "git.h do_git_pull" c_do_git_pull :: CString -> CString -> 
 foreign import ccall "git.h get_last_merge_oid" c_get_last_merge_oid :: IO CString
 
 -- Return: 0: OK -1: Not a repo -2: does not have specified remote
+-- Arguments: Target path, Repo URL
 isRepo :: String -> String -> IO Int
-isRepo _path _url = join $ c_is_repo <$> newCString _path <*> newCString _url
+isRepo _path _url = do
+    path <- newCString _path
+    url  <- newCString _url
+    ret <- c_is_repo path url
+    free path
+    free url
+    return ret
 
+-- Args: Repo URL, target path, refspec (branch)
 doClone :: String -> String -> String -> IO Int
-doClone _url _path _refspec = join $ c_do_git_clone <$> newCString _url <*> newCString _path <*> newCString _refspec
+doClone _url _path _refspec = do
+    path <- newCString _path
+    url  <- newCString _url
+    refspec <- newCString _refspec
+    ret <- c_do_git_clone url path refspec
+    free path
+    free url
+    free refspec
+    return ret
 
+-- Args: local repo path, refspec (branch)
 doPull :: String -> String -> IO Int
-doPull _path _refspec = join $ c_do_git_pull <$> newCString _path <*> newCString _refspec
+doPull _path _refspec = do
+    path  <- newCString _path
+    refspec <- newCString _refspec
+    ret <- c_do_git_pull path refspec
+    free path
+    free refspec
+    return ret
 
 getLastOid :: IO String
 getLastOid = do
-        cs <- c_get_last_merge_oid
-        s <- peekCAString cs
-        free cs
-        return s
+    cs <- c_get_last_merge_oid
+    s <- peekCAString cs
+    free cs
+    return s

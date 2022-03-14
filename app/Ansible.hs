@@ -12,10 +12,21 @@
 module Ansible where
 import Foreign.C.Types
 import Foreign.C.String
+import Foreign.Marshal.Alloc
+
 import Control.Monad
 
 foreign import ccall "ansible.h ansible" c_ansible :: CString -> CString -> CString -> CString -> IO Int
 
 ansiblePlaybook :: String -> String -> String -> String -> IO Int
 ansiblePlaybook _path _pb _limit _tag = do
-        join $ c_ansible <$> newCString _path <*> newCString _pb <*> newCString _limit <*> newCString _tag
+        path <- newCAString _path
+        pb <- newCAString _pb
+        limit <- newCAString _limit
+        tag <- newCAString _tag
+        ret <- c_ansible path pb limit tag
+        free path
+        free pb
+        free limit
+        free tag
+        return ret
