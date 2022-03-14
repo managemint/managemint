@@ -96,10 +96,11 @@ updateConfigRepoJobTemplates _ = do
 
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
-    dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
-    let templs = zipWith createUserTemplate (map (entityVal.snd3) dataJoin) (map (entityVal.thr3) dataJoin)
-    mapM_ (delete . entityKey . fst3) dataJoin
-    return $ M.fromList $ zip ["USERTEMPLATE" ++ show n | n <- [0..]] templs -- TODO: Parser is not allowed to parse a config name starting with "USERTEMPLATE"
+--    dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
+--    let templs = zipWith createUserTemplate (map (entityVal.snd3) dataJoin) (map (entityVal.thr3) dataJoin)
+--    mapM_ (delete . entityKey . fst3) dataJoin
+--    return $ M.fromList $ zip ["USERTEMPLATE" ++ show n | n <- [0..]] templs -- TODO: Parser is not allowed to parse a config name starting with "USERTEMPLATE"
+    return M.empty
 
 createUserTemplate :: Playbook -> Project -> JobTemplate
 createUserTemplate play proj = JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl proj, _playbook=playbookPlaybookName play, _failCount=0, _systemJob=False}

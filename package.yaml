@@ -10,10 +10,10 @@ copyright:           "2022 Jonas Gunz, Konstantin Grabmanm, Paul Trojahn"
 
 c-sources: csrc/*.c
 cc-options:
-  - '-D_PYINCLUDE=<python3.10/Python.h>'
+  - '-D_PYINCLUDE=<python3.9/Python.h>'
 include-dirs: csrc/
 extra-libraries:
-  - python3.10
+  - python3.9
   - git2
 
 dependencies:
