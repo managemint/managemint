@@ -9,11 +9,17 @@
  -}
 
 {-# LANGUAGE CApiFFI, ForeignFunctionInterface #-}
-module Git(isRepo, doClone, doPull, getLastOid) where
+module Git(isRepo, doClone, doPull, getLastOid, GitException) where
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Control.Monad
+import Control.Exception
+
+data GitException = CloneFail | PullFail
+    deriving (Show)
+
+instance Exception GitException
 
 -- TODO Free CStrings?
 
@@ -28,30 +34,29 @@ foreign import ccall "git.h do_git_pull" c_do_git_pull :: CString -> CString -> 
 
 foreign import ccall "git.h get_last_merge_oid" c_get_last_merge_oid :: IO CString
 
--- Return: 0: OK -1: Not a repo -2: does not have specified remote
 -- Arguments: Target path, Repo URL
-isRepo :: String -> String -> IO Int
+isRepo :: String -> String -> IO Bool
 isRepo _path _url = do
     arg@[path, url] <- mapM newCAString [_path, _url]
     ret <- c_is_repo path url
     mapM_ free arg
-    return ret
+    return $ (==0) ret
 
 -- Args: Repo URL, target path, refspec (branch)
-doClone :: String -> String -> String -> IO Int
+doClone :: String -> String -> String -> IO ()
 doClone _url _path _refspec = do
     arg@[path, url, refspec] <- mapM newCAString [_path, _url, _refspec]
     ret <- c_do_git_clone url path refspec
     mapM_ free arg
-    return ret
+    when (ret /= 0) $ throwIO CloneFail
 
 -- Args: local repo path, refspec (branch)
-doPull :: String -> String -> IO Int
+doPull :: String -> String -> IO ()
 doPull _path _refspec = do
     arg@[path, refspec] <- mapM newCAString [_path, _refspec]
     ret <- c_do_git_pull path refspec
     mapM_ free arg
-    return ret
+    when (ret /= 0) $ throwIO PullFail
 
 getLastOid :: IO String
 getLastOid = do
