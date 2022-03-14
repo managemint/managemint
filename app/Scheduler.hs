@@ -34,7 +34,7 @@ import qualified Database.Persist.MySQL as MySQL (get)
 import System.Directory
 
 -- TODO: Implement prettier instance of Show
-data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
+data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _playbookId :: PlaybookId, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
     deriving (Show)
 data Job = Job {_timeDue :: LocalTime, _templateName :: String}
     deriving (Eq, Show)
@@ -81,11 +81,14 @@ executeJob pool job = do
     template <- get
     when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
         time <- liftIO getTime
-        runKey <- liftIO $ addRun (Run 1 (takeWhile (/= '.') (show time))) pool
+        runKey <- liftIO $ case template^? ix (job^.templateName) . playbookId of
+                             Just id -> addRun (Run id 1 (takeWhile (/= '.') (show time))) pool
+                             Nothing -> error "Internal error, bye."
         success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
         let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
         put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
             where
+                dot :: Monoid a => M.Map String JobTemplate -> ((a -> Const a a) -> JobTemplate -> Const a JobTemplate) -> a
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
 
 -- Projecte aus der Datenbank lesen
@@ -107,7 +110,7 @@ updateConfigRepoJobTemplates pool templ = do
 createSystemTemplate :: ConnectionPool -> Entity Project -> IO JobTemplates
 createSystemTemplate pool project = do
     success <- catch (getRepo path url branch >> return True) (markProjectFailed pool (entityKey project))
-    if success then runSqlPool (update (entityKey project) [ProjectErrorMessage =. ""]) pool >> readAndParseConfigFile path project
+    if success then runSqlPool (update (entityKey project) [ProjectErrorMessage =. ""]) pool >> readAndParseConfigFile pool path project
                else return M.empty
         where
             url = projectUrl $ entityVal project
@@ -115,8 +118,10 @@ createSystemTemplate pool project = do
             branch = projectBranch $ entityVal project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
-readAndParseConfigFile :: FilePath -> Entity Project -> IO JobTemplates
-readAndParseConfigFile _ _ = return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False, _repoIdentifier=""})]
+readAndParseConfigFile :: ConnectionPool -> FilePath -> Entity Project -> IO JobTemplates
+readAndParseConfigFile pool _ p = do
+    testId <- entityKey . head <$> getPlaybooks (entityKey p) pool -- TODO: Remove, this is only for testing
+    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=""})]
 
 markProjectFailed :: ConnectionPool -> Key Project -> GitException -> IO Bool
 markProjectFailed pool key e = runSqlPool (update key [ProjectErrorMessage =. show e]) pool >> return False
@@ -137,13 +142,13 @@ fillFolder path url branch = removePathForcibly path >> doClone url path branch
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
     dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
-    let templs = map (\(_,x,y) -> createUserTemplate (entityVal x) (entityVal y)) dataJoin
+    let templs = map (\(_,x,y) -> createUserTemplate x y) dataJoin
     mapM_ (delete . entityKey . fst3) dataJoin
     return $ M.fromList $ zip [schedulerUserTemplateKey ++ show n | n <- [0..]] templs
 
-createUserTemplate :: Playbook -> Project -> JobTemplate
+createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl proj, _playbook=playbookPlaybookName play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
+    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl $ entityVal proj, _playbook=playbookPlaybookName $ entityVal play, _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
 projectUrlToPath :: String -> FilePath
