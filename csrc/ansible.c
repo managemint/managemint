@@ -35,6 +35,15 @@ PyObject *import_name(const char *modname, const char *symbol)
 }
 
 int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
+    char cwd[1024];
+
+	PyObject *run_func, *args, *kwargs, *result = NULL;
+	PyGILState_STATE state;
+
+	int ret = -1;
+
+    getcwd(cwd, sizeof(cwd));
+
 	// TODO Yeah we should sanitize here...
 	if(chdir(_path)) {
 		printf("Couldn't chdir() to '%s': %s\n", _path, strerror(errno));
@@ -42,11 +51,6 @@ int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 	}
 
 	putenv("ANSIBLE_STDOUT_CALLBACK=ffpp.hansible_modules.hansible_export");
-
-	PyObject *run_func, *args, *kwargs, *result = NULL;
-	PyGILState_STATE state;
-
-	int ret = -1;
 
 	if (!_playbook)
 		return -1;
@@ -86,5 +90,7 @@ int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 	PyGILState_Release(state);
 
 	Py_Finalize();
+
+    chdir(cwd);
 	return ret;
 }
