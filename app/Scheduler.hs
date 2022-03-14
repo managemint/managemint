@@ -21,12 +21,14 @@ import Config
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
 import Data.List (sort)
+import Data.Either (isRight)
 import qualified Data.Map as M
 import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
+import Control.Exception
 import Database.Persist.MySQL hiding (get)
 import qualified Database.Persist.MySQL as MySQL (get)
 import System.Directory
@@ -86,25 +88,50 @@ executeJob pool job = do
             where
                 dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
 
--- Read Project from Database, look if exisits
---   No  -> Write Failed in Project table
---   Yes -> Clone/Update Repo Write Run with Run status running and pass key to exec 
---   Delte folder if clone update fail
---     Parse and fill JobTemplates
---       Failed to parse -> Write Failed run in Databse
+-- Projecte aus der Datenbank lesen
+-- Für jedes Projekt:
+--   Schauen ob der Ordner schon existiert:
+--     Nein -> erstellen
+--             Clone ausführen (f/s)
+--     Ja -> Schauen ob das eine Repo ist
+--       Nein -> Ordner löschen
+--               Clone ausführen (f/s)
+--       Ja   -> Pull ausführen (f/s)
+--  Nun Config Datei parsen (f/s)
+--  Daraus Templates erstellen
 updateConfigRepoJobTemplates :: ConnectionPool -> JobTemplates -> IO JobTemplates
 updateConfigRepoJobTemplates pool templ = do
     projects <- getProjects pool
-    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False, _repoIdentifier=""})]  -- TODO: Remove this is for testing
+    mapM (createSystemTemplate pool) projects <&> M.unions
 
-createAndFillFolder :: String -> String -> IO (Either String Bool)
-createAndFillFolder url branch = do
-    andM [doesDirectoryExist path, (==0) <$> isRepo path url, (==0) <$> doPull url branch]
-        >>= \b -> if b then return (Right True)
-                       else (\i -> if i==0 then Right True else Left "") <$> (createDirectory path >> doClone path url branch) --TODO Change
-        where path = projectUrlToPath url
+createSystemTemplate :: ConnectionPool -> Entity Project -> IO JobTemplates
+createSystemTemplate pool project = do
+    catch (getRepo path url branch) (markProjectFailed pool (entityKey project)) --TODO: If execption occures, return empty Map and if not, set ProjectErrorMessage to ""
+    readAndParseConfigFile path project
+        where
+            url = projectUrl $ entityVal project
+            path = projectUrlToPath url
+            branch = projectBranch $ entityVal project
 
+-- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
+readAndParseConfigFile :: String -> Entity Project -> IO JobTemplates
+readAndParseConfigFile _ _ = return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _failCount=0, _systemJob=False, _repoIdentifier=""})]
 
+markProjectFailed :: ConnectionPool -> Key Project -> GitException -> IO ()
+markProjectFailed pool key e = runSqlPool (update key [ProjectErrorMessage =. show e]) pool
+
+getRepo :: String -> String -> String -> IO ()
+getRepo path url branch =
+    ifM (doesDirectoryExist path) (updateFolder path url branch) (fillFolder path url branch)
+
+updateFolder :: String -> String -> String -> IO ()
+updateFolder path url branch =
+    ifM (isRepo path url)
+        (doPull path branch)
+        (fillFolder path url branch)
+
+fillFolder :: String -> String -> String -> IO ()
+fillFolder path url branch = removePathForcibly path >> doClone url path branch
 
 readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobsDatabase = do
@@ -146,8 +173,11 @@ getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
 runJobs pool jobTempls = do
-    jobTempls' <- M.union <$> updateConfigRepoJobTemplates pool jobTempls <*> runSqlPool readJobsDatabase pool
+    jobTempls' <- M.union <$> updateConfigRepoJobTemplates pool jobTempls <*> runSqlPool readJobsDatabase pool --Have different timing for the two updates
     snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM b t e = b >>= \b -> if b then t else e
 
 schedule :: ConnectionPool -> IO ()
 schedule pool = do
