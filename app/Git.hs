@@ -9,16 +9,10 @@
  -}
 
 {-# LANGUAGE CApiFFI, ForeignFunctionInterface #-}
-module Git(isRepo, doClone, doPull, getLastOid, GitException) where
+module Git(isRepo, doClone, doPull, getLastOid) where
 import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Alloc
-import Control.Monad
-import Control.Monad.Except
-import Control.Monad.Trans.Reader (ReaderT)
-import Database.Persist.MySQL (SqlBackend)
-
-type GitException = ExceptT String (ReaderT SqlBackend IO)
 
 -- path -> url -> result
 foreign import ccall "git.h is_repo" c_is_repo :: CString -> CString -> IO Int
@@ -51,11 +45,11 @@ internalErrstr i
 getLastErrstr :: IO String
 getLastErrstr = peekCAString =<< c_get_last_error
 
-handleError :: Int -> GitException ()
+handleError :: Int -> IO (Either String ())
 handleError i
-    | i == c_hsgit_ok = return ()
-    | i == c_hsgit_call_failed = throwError =<< liftIO getLastErrstr
-    | otherwise = throwError $ internalErrstr i
+    | i == c_hsgit_ok = return $ Right ()
+    | i == c_hsgit_call_failed = fmap Left getLastErrstr
+    | otherwise = return $ Left $ internalErrstr i
 
 -- Arguments: Target path, Repo URL
 isRepo :: String -> String -> IO Bool
@@ -66,19 +60,19 @@ isRepo _path _url = do
     return $ (==0) ret
 
 -- Args: Repo URL, target path, refspec (branch)
-doClone :: String -> String -> String -> GitException ()
+doClone :: String -> String -> String -> IO (Either String ())
 doClone _url _path _refspec = do
-    arg@[path, url, refspec] <- liftIO $mapM newCAString [_path, _url, _refspec]
-    ret <- liftIO $ c_do_git_clone url path refspec
-    liftIO $ mapM_ free arg
+    arg@[path, url, refspec] <- mapM newCAString [_path, _url, _refspec]
+    ret <- c_do_git_clone url path refspec
+    mapM_ free arg
     handleError ret
 
 -- Args: local repo path, refspec (branch)
-doPull :: String -> String -> GitException ()
+doPull :: String -> String -> IO (Either String ())
 doPull _path _refspec = do
-    arg@[path, refspec] <- liftIO $ mapM newCAString [_path, _refspec]
-    ret <- liftIO $ c_do_git_pull path refspec
-    liftIO $ mapM_ free arg
+    arg@[path, refspec] <- mapM newCAString [_path, _refspec]
+    ret <- c_do_git_pull path refspec
+    mapM_ free arg
     handleError ret
 
 getLastOid :: IO String
