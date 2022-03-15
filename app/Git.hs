@@ -18,8 +18,6 @@ import Control.Monad.Except
 import Control.Monad.Trans.Reader (ReaderT)
 import Database.Persist.MySQL (SqlBackend)
 
-import Text.Printf
-
 type GitException = ExceptT String (ReaderT SqlBackend IO)
 
 -- path -> url -> result
@@ -43,27 +41,25 @@ foreign import capi "git.h value HSGIT_INCORRECT_REMOTE" c_hsgit_incorrect_remot
 foreign import capi "git.h value HSGIT_REFSPEC_NOT_MERGEABLE" c_hsgit_refspec_not_mergeable :: Int
 
 internalErrstr :: Int -> String
-internalErrstr i = case i of
-    c_hsgit_refspec_not_mergeable -> "Refspec is not mergable"
-    c_hsgit_incorrect_remote -> "Specified remote is not set"
-    c_hsgit_call_failed -> "libgit error"
-    c_hsgit_ok -> "OK"
-    _ -> "Unknown Error"
+internalErrstr i
+    | i == c_hsgit_refspec_not_mergeable = "Refspec is not mergable"
+    | i == c_hsgit_incorrect_remote = "Specified remote is not set"
+    | i == c_hsgit_call_failed = "libgit error"
+    | i == c_hsgit_ok = "OK"
+    | otherwise = "Unknown Error"
 
 getLastErrstr :: IO String
 getLastErrstr = peekCAString =<< c_get_last_error
 
 handleError :: Int -> GitException ()
-handleError i = case i of
-    c_hsgit_ok -> return ()
-    c_hsgit_call_failed -> throwError =<< liftIO getLastErrstr
-    _ -> throwError $ internalErrstr i
+handleError i
+    | i == c_hsgit_ok = return ()
+    | i == c_hsgit_call_failed = throwError =<< liftIO getLastErrstr
+    | otherwise = throwError $ internalErrstr i
 
 -- Arguments: Target path, Repo URL
 isRepo :: String -> String -> IO Bool
 isRepo _path _url = do
-    printf "%i %i %i\n" c_hsgit_ok c_hsgit_call_failed c_hsgit_incorrect_remote
-
     arg@[path, url] <- mapM newCAString [_path, _url]
     ret <- c_is_repo path url
     mapM_ free arg

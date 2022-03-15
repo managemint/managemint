@@ -15,11 +15,6 @@
 #define HSGIT_INCORRECT_REMOTE	-2
 #define HSGIT_REFSPEC_NOT_MERGEABLE -3
 
-#define HSGIT_NOT_A_REPO	-1
-#define HSGIT_FETCH_FAILED	-4
-#define HSGIT_CHECKOUT_FAILED	-5
-#define HSGIT_MERGE_FAILED	-6
-
 char *get_last_merge_oid();
 
 char *get_last_error();
