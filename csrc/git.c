@@ -155,7 +155,6 @@ int do_git_clone(char* _url, char* _path, char* _refspec) {
 	int ret = -1;
 	git_repository* repo = NULL;
 	git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
-	const git_error *err;
 
 	clone_opts.checkout_branch = _refspec;
 	clone_opts.fetch_opts.callbacks.credentials = auth_callback;
