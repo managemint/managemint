@@ -21,6 +21,10 @@
 #include <errno.h>
 #include <stdio.h>
 
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 PyObject *import_name(const char *modname, const char *symbol)
 {
 	PyObject *u_name, *module;
@@ -34,26 +38,22 @@ PyObject *import_name(const char *modname, const char *symbol)
 	return PyObject_GetAttrString(module, symbol);
 }
 
-int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
-    char cwd[1024];
-
+static void run_ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 	PyObject *run_func, *args, *kwargs, *result = NULL;
 	PyGILState_STATE state;
 
 	int ret = -1;
 
-    getcwd(cwd, sizeof(cwd));
+	if (!_playbook)
+		exit(-1);
 
 	// TODO Yeah we should sanitize here...
 	if(chdir(_path)) {
 		printf("Couldn't chdir() to '%s': %s\n", _path, strerror(errno));
-		return -1;
+		exit(-1);
 	}
 
 	putenv("ANSIBLE_STDOUT_CALLBACK=ffpp.hansible_modules.hansible_export");
-
-	if (!_playbook)
-		return -1;
 
 	/* TODO: Use those! */
 	if (!_limit)
@@ -68,6 +68,8 @@ int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 
 	if (!run_func || !PyCallable_Check(run_func)) {
 		printf("No Callable!\n");
+		if(PyErr_Occurred())
+			PyErr_Print();
 		goto end;
 	}
 
@@ -90,7 +92,19 @@ int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 	PyGILState_Release(state);
 
 	Py_Finalize();
+	exit(ret);
+}
 
-    chdir(cwd);
+int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
+	pid_t pid = fork();
+	int ret;
+
+	if(pid == 0)
+		run_ansible(_path, _playbook, _limit, _tag);
+
+
+	if(waitpid(pid, &ret, 0) < 0)
+		return 99; // TODO Error
+	
 	return ret;
 }
