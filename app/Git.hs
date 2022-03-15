@@ -46,7 +46,7 @@ internalErrstr i
     | i == c_hsgit_incorrect_remote = "Specified remote is not set"
     | i == c_hsgit_call_failed = "libgit error"
     | i == c_hsgit_ok = "OK"
-    | otherwise = "Unknown Error"
+    | otherwise = "Unknown Error: " ++ show  i
 
 getLastErrstr :: IO String
 getLastErrstr = peekCAString =<< c_get_last_error
