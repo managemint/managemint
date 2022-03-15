@@ -14,12 +14,11 @@ import Foreign.C.Types
 import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Control.Monad
-import Control.Exception
+import Control.Monad.Except
+import Control.Monad.Trans.Reader (ReaderT)
+import Database.Persist.MySQL (SqlBackend)
 
-data GitException = CloneFail | PullFail
-    deriving (Show)
-
-instance Exception GitException
+type GitException = ExceptT String (ReaderT SqlBackend IO)
 
 -- TODO Free CStrings?
 
@@ -43,20 +42,20 @@ isRepo _path _url = do
     return $ (==0) ret
 
 -- Args: Repo URL, target path, refspec (branch)
-doClone :: String -> String -> String -> IO ()
+doClone :: String -> String -> String -> GitException ()
 doClone _url _path _refspec = do
-    arg@[path, url, refspec] <- mapM newCAString [_path, _url, _refspec]
-    ret <- c_do_git_clone url path refspec
-    mapM_ free arg
-    when (ret /= 0) $ throwIO CloneFail
+    arg@[path, url, refspec] <- liftIO $mapM newCAString [_path, _url, _refspec]
+    ret <- liftIO $ c_do_git_clone url path refspec
+    liftIO $ mapM_ free arg
+    when (ret /= 0) $ throwError "Clone failed"
 
 -- Args: local repo path, refspec (branch)
-doPull :: String -> String -> IO ()
+doPull :: String -> String -> GitException ()
 doPull _path _refspec = do
-    arg@[path, refspec] <- mapM newCAString [_path, _refspec]
-    ret <- c_do_git_pull path refspec
-    mapM_ free arg
-    when (ret /= 0) $ throwIO PullFail
+    arg@[path, refspec] <- liftIO $ mapM newCAString [_path, _refspec]
+    ret <- liftIO $ c_do_git_pull path refspec
+    liftIO $ mapM_ free arg
+    when (ret /= 0) $ throwError "Pill failed"
 
 getLastOid :: IO String
 getLastOid = do
