@@ -194,9 +194,5 @@ after x xs = case dropWhile (/= x) xs of
           []  -> []
           xs' -> tail xs'
 
-andM :: Monad m => [m Bool] -> m Bool
-andM []     = return True
-andM (b:bs) = b >>= \b -> if not b then return False else andM bs
-
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
