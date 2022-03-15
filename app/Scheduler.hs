@@ -99,7 +99,7 @@ executeJob pool job = do
 updateConfigRepoJobTemplates ::  JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templ = do
     projects <- getProjects
-    mapM createSystemTemplate projects <&> M.unions
+    fmap (M.union templ) $ mapM createSystemTemplate projects <&> M.unions
 
 createSystemTemplate ::  Entity Project -> ReaderT SqlBackend IO JobTemplates
 createSystemTemplate project = do
