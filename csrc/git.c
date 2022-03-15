@@ -29,7 +29,7 @@
 //TODO Remove
 #include <stdio.h>
 
-#define ASSERT_GIT_CALL(a) {if(a!=0){ret=HSGIT_CALL_FAILED; goto error;}}
+#define ASSERT_GIT_CALL(a) {if(a!=0){ret=HSGIT_CALL_FAILED; update_last_error(); goto error;}}
 
 #define _GIT_DEFAULT_REMOTE "origin"
 

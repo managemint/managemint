@@ -103,28 +103,20 @@ newtype AnsibleEvent = AnsibleEvent
 -- TODO put in /run
 sockPath = executorSockPath
 
-notifyDatabase :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
-notifyDatabase arr pool rid = do
-        runSqlPool (insert $ Event (taskARR arr) (taskIdARR arr) (playARR arr)
-            (playIdARR arr) (hostARR arr) rid (is_changed arr) (is_skipped arr)
-            (is_failed arr) (is_unreachable arr) (is_item arr) (item arr)
-            "Output not implemented") pool
+writeResult :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
+writeResult arr pool rid = void $ addEvent (Event (taskARR arr) (taskIdARR arr)
+            (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
+            (is_skipped arr) (is_failed arr) (is_unreachable arr) (is_item arr)
+            (item arr) "Output not implemented") pool
 
-        printf "Result: %s, F: %s UR: %s SK: %s\n"
-            (taskARR arr) (show $ is_failed arr)
-            (show $ is_unreachable arr) (show $ is_skipped arr)
-
-notifyScheduler :: AnsibleRunnerStart -> IO ()
-notifyScheduler ars = do
-        printf "Start: %s, Host: %s\n"
-            (taskARS ars) (hostARS ars)
+writeStart :: AnsibleRunnerStart -> ConnectionPool -> RunId -> IO ()
+writeStart ars = undefined
 
 processAnsibleEvent :: String -> String -> ConnectionPool -> RunId -> IO ()
-processAnsibleEvent "task_runner_result" s pool rid =
-        notifyDatabase (decodeJSON s :: AnsibleRunnerResult) pool rid
-processAnsibleEvent "task_runner_start" s pool rid =
-        notifyScheduler (decodeJSON s :: AnsibleRunnerStart)
-processAnsibleEvent e s p r = return ()
+processAnsibleEvent e s = case e of
+        "task_runner_result" -> writeResult (decodeJSON s :: AnsibleRunnerResult)
+        "task_runner_start"  -> writeStart  (decodeJSON s :: AnsibleRunnerStart)
+        _ -> undefined
 
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
 execPlaybook pool rid pb = do
@@ -134,7 +126,6 @@ execPlaybook pool rid pb = do
 
         pb <- async $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
         as <- async $ forever $ do
-            -- Poll pb-thread
             callbackRaw <- readSocket sock
             let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
             processAnsibleEvent (event callbackAE) callbackRaw pool rid
