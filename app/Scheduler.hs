@@ -20,14 +20,12 @@ import Config
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
 import Data.List (sort)
-import Data.Either (isRight)
 import qualified Data.Map as M
 import Control.Lens
 import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
-import Control.Monad.Except
 import Database.Persist.MySQL hiding (get)
 import qualified Database.Persist.MySQL as MySQL (get)
 import System.Directory
@@ -101,17 +99,18 @@ executeJob pool job = do
 updateConfigRepoJobTemplates ::  JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templ = do
     projects <- getProjects
-    mapM createSystemTemplate projects <&> M.unions
+    fmap (M.union templ) $ mapM createSystemTemplate projects <&> M.unions
 
 createSystemTemplate ::  Entity Project -> ReaderT SqlBackend IO JobTemplates
 createSystemTemplate project = do
-    success <- runExceptT (getRepo path url branch) >>= markProjectFailed (entityKey project)
-    if success then update (entityKey project) [ProjectErrorMessage =. ""] >> readAndParseConfigFile path project
-               else return M.empty
-        where
-            url = projectUrl $ entityVal project
-            path = projectUrlToPath url
-            branch = projectBranch $ entityVal project
+    ret <- liftIO $ getRepo path url branch
+    case ret of
+      Left e   -> markProjectFailed (entityKey project) e >> return M.empty
+      Right () -> update (entityKey project) [ProjectErrorMessage =. ""] >> readAndParseConfigFile path project
+    where
+        url = projectUrl $ entityVal project
+        path = projectUrlToPath url
+        branch = projectBranch $ entityVal project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
 readAndParseConfigFile :: FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
@@ -119,21 +118,20 @@ readAndParseConfigFile _ p = do
     testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
     return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=""})]
 
-markProjectFailed :: Key Project -> Either String () -> ReaderT SqlBackend IO Bool
-markProjectFailed key (Left e) = update key [ProjectErrorMessage =. e] >> return False
-markProjectFailed _ _          = return True
+markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
+markProjectFailed key e = update key [ProjectErrorMessage =. e]
 
-getRepo :: String -> String -> String -> GitException ()
+getRepo :: String -> String -> String -> IO (Either String ())
 getRepo path url branch =
     ifM (liftIO (doesDirectoryExist path)) (updateFolder path url branch) (fillFolder path url branch)
 
-updateFolder :: String -> String -> String -> GitException ()
+updateFolder :: String -> String -> String -> IO (Either String ())
 updateFolder path url branch =
     ifM (liftIO (isRepo path url))
         (doPull path branch)
         (fillFolder path url branch)
 
-fillFolder :: String -> String -> String -> GitException ()
+fillFolder :: String -> String -> String -> IO (Either String ())
 fillFolder path url branch = liftIO (removePathForcibly path) >> doClone url path branch
 
 readJobQueueDatabase :: ReaderT SqlBackend IO JobTemplates
@@ -193,10 +191,6 @@ after :: Eq a => a -> [a] -> [a]
 after x xs = case dropWhile (/= x) xs of
           []  -> []
           xs' -> tail xs'
-
-andM :: Monad m => [m Bool] -> m Bool
-andM []     = return True
-andM (b:bs) = b >>= \b -> if not b then return False else andM bs
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
