@@ -29,7 +29,7 @@
 //TODO Remove
 #include <stdio.h>
 
-#define ASSERT_GIT_CALL(a,r) {if(a!=0){ret=r; print_last_errstr(); goto error;}}
+#define ASSERT_GIT_CALL(a) {if(a!=0){ret=HSGIT_CALL_FAILED; goto error;}}
 
 #define _GIT_DEFAULT_REMOTE "origin"
 
@@ -98,6 +98,10 @@ static void print_last_errstr() {
 	}
 }
 
+char *get_last_error() {
+	return git_error_last()->message;
+}
+
 char *get_last_merge_oid() {
 	char *ret = NULL;
 	size_t len = GIT_OID_HEXSZ+1;
@@ -119,8 +123,8 @@ int is_repo(char* _path, char* _remote) {
 
 	git_libgit2_init();
 
-	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL), HSGIT_NOT_A_REPO );
-	ASSERT_GIT_CALL( git_remote_list(&remotes, repo), -1 );
+	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL) );
+	ASSERT_GIT_CALL( git_remote_list(&remotes, repo) );
 
 	if (remotes.count <= 0) {
 		ret = HSGIT_INCORRECT_REMOTE;
@@ -128,7 +132,7 @@ int is_repo(char* _path, char* _remote) {
 	}
 
 	for (unsigned int i = 0; i < remotes.count; i++) {
-		ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, remotes.strings[i]), HSGIT_INCORRECT_REMOTE );
+		ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, remotes.strings[i]) );
 
 		if (strcmp(git_remote_url(remote), _remote) == 0) {
 			ret = GIT_OK;
@@ -158,7 +162,7 @@ int do_git_clone(char* _url, char* _path, char* _refspec) {
 
 	git_libgit2_init();
 
-	ASSERT_GIT_CALL(git_clone(&repo, _url, _path, &clone_opts), HSGIT_CALL_FAILED);
+	ASSERT_GIT_CALL(git_clone(&repo, _url, _path, &clone_opts));
 
 	ret = 0;
 
@@ -187,21 +191,21 @@ int do_git_pull(char* _path, char* _refspec) {
 
 	git_libgit2_init();
 
-	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL), HSGIT_NOT_A_REPO );
+	ASSERT_GIT_CALL( git_repository_open_ext(&repo, _path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL) );
 
-	ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, _GIT_DEFAULT_REMOTE), HSGIT_INCORRECT_REMOTE );
-	ASSERT_GIT_CALL( git_remote_fetch(remote, NULL, &fetch_opts, NULL), HSGIT_FETCH_FAILED );
+	ASSERT_GIT_CALL( git_remote_lookup(&remote, repo, _GIT_DEFAULT_REMOTE) );
+	ASSERT_GIT_CALL( git_remote_fetch(remote, NULL, &fetch_opts, NULL) );
 
 	glbl__merge_oid_set = 0;
 	git_repository_fetchhead_foreach( repo, fetchhead_ref_callback, _refspec );
 
 	if(!glbl__merge_oid_set) {
-		ret = HSGIT_MERGE_FAILED;
+		ret = HSGIT_REFSPEC_NOT_MERGEABLE;
 		goto error;
 	}
 
-	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid), HSGIT_MERGE_FAILED );
-	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts), HSGIT_MERGE_FAILED );
+	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid) );
+	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
 
 	ret = 0;
 
