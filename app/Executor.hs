@@ -110,13 +110,15 @@ writeResult arr pool rid = void $ addEvent (Event (taskARR arr) (taskIdARR arr)
             (item arr) "Output not implemented") pool
 
 writeStart :: AnsibleRunnerStart -> ConnectionPool -> RunId -> IO ()
-writeStart ars = undefined
+writeStart ars pool rid = return ()
 
 processAnsibleEvent :: String -> String -> ConnectionPool -> RunId -> IO ()
 processAnsibleEvent e s = case e of
         "task_runner_result" -> writeResult (decodeJSON s :: AnsibleRunnerResult)
         "task_runner_start"  -> writeStart  (decodeJSON s :: AnsibleRunnerStart)
-        _ -> undefined
+        _ -> \_ _ -> return ()
+
+--processAnsibleEvent e s _ _ =  return ()
 
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
 execPlaybook pool rid pb = do
