@@ -96,7 +96,7 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
         |]
 
 getTaskIds :: MonadIO m => Key Run -> Int -> ReaderT SqlBackend m [Single Int]
-getTaskIds run playId = rawSql "SELECT DISTINCT event.play_id FROM event WHERE event.run_id=? AND event.play_id=?" [toPersistValue run, toPersistValue playId]
+getTaskIds run playId = rawSql "SELECT DISTINCT event.task_id FROM event WHERE event.run_id=? AND event.play_id=?" [toPersistValue run, toPersistValue playId]
 
 playWidget :: Entity Run -> Int -> ConnectionPool -> Widget
 playWidget entity@(Entity runid run) playId pool = do
