@@ -9,7 +9,6 @@
  -}
 
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE GADTs #-}
 
 module Scheduler (schedule) where
 
@@ -28,7 +27,7 @@ import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
-import Control.Exception
+import Control.Monad.Except
 import Database.Persist.MySQL hiding (get)
 import qualified Database.Persist.MySQL as MySQL (get)
 import System.Directory
@@ -78,18 +77,15 @@ executeJobs pool jobs = do
 
 executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob pool job = do
-    template <- get
-    when (maybe False (\x -> x ^. failCount <= schedulerFailMax) (template ^? ix (job^.templateName))) $ do
-        time <- liftIO getTime
-        runKey <- liftIO $ case template^? ix (job^.templateName) . playbookId of
-                             Just id -> addRun (Run id 1 (takeWhile (/= '.') (show time))) pool
-                             Nothing -> error "Internal error, bye."
-        success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template `dot` repoPath, playbookName=template `dot` playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-        let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
-        put $ template & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else (+1))
-            where
-                dot :: Monoid a => M.Map String JobTemplate -> ((a -> Const a a) -> JobTemplate -> Const a JobTemplate) -> a
-                dot template f = template^.ix (job^.templateName) . f  -- TODO: This needs GADTs, figure out why
+    templates <- get
+    case templates ^? ix (job^.templateName) of
+      Nothing       -> error "Internal error, a job was created from a nonexistent job template."
+      Just template -> when (template^.failCount <= schedulerFailMax) $ do
+          time <- liftIO getTime
+          runKey <- liftIO $ addRun (Run (template^.playbookId) 1 (takeWhile (/= '.') (show time))) pool
+          success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template^.repoPath, playbookName=template^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+          let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
+          put $ templates & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else ( +1))
 
 -- Projecte aus der Datenbank lesen
 -- Für jedes Projekt:
@@ -102,15 +98,15 @@ executeJob pool job = do
 --       Ja   -> Pull ausführen (f/s)
 --  Nun Config Datei parsen (f/s)
 --  Daraus Templates erstellen
-updateConfigRepoJobTemplates :: ConnectionPool -> JobTemplates -> IO JobTemplates
-updateConfigRepoJobTemplates pool templ = do
-    projects <- getProjects pool
-    mapM (createSystemTemplate pool) projects <&> M.unions
+updateConfigRepoJobTemplates ::  JobTemplates -> ReaderT SqlBackend IO JobTemplates
+updateConfigRepoJobTemplates templ = do
+    projects <- getProjects
+    mapM createSystemTemplate projects <&> M.unions
 
-createSystemTemplate :: ConnectionPool -> Entity Project -> IO JobTemplates
-createSystemTemplate pool project = do
-    success <- catch (getRepo path url branch >> return True) (markProjectFailed pool (entityKey project))
-    if success then runSqlPool (update (entityKey project) [ProjectErrorMessage =. ""]) pool >> readAndParseConfigFile pool path project
+createSystemTemplate ::  Entity Project -> ReaderT SqlBackend IO JobTemplates
+createSystemTemplate project = do
+    success <- runExceptT (getRepo path url branch) >>= markProjectFailed (entityKey project)
+    if success then update (entityKey project) [ProjectErrorMessage =. ""] >> readAndParseConfigFile path project
                else return M.empty
         where
             url = projectUrl $ entityVal project
@@ -118,29 +114,30 @@ createSystemTemplate pool project = do
             branch = projectBranch $ entityVal project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
-readAndParseConfigFile :: ConnectionPool -> FilePath -> Entity Project -> IO JobTemplates
-readAndParseConfigFile pool _ p = do
-    testId <- entityKey . head <$> getPlaybooks (entityKey p) pool -- TODO: Remove, this is only for testing
+readAndParseConfigFile :: FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
+readAndParseConfigFile _ p = do
+    testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
     return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=""})]
 
-markProjectFailed :: ConnectionPool -> Key Project -> GitException -> IO Bool
-markProjectFailed pool key e = runSqlPool (update key [ProjectErrorMessage =. show e]) pool >> return False
+markProjectFailed :: Key Project -> Either String () -> ReaderT SqlBackend IO Bool
+markProjectFailed key (Left e) = update key [ProjectErrorMessage =. e] >> return False
+markProjectFailed _ _          = return True
 
-getRepo :: String -> String -> String -> IO ()
+getRepo :: String -> String -> String -> GitException ()
 getRepo path url branch =
-    ifM (doesDirectoryExist path) (updateFolder path url branch) (fillFolder path url branch)
+    ifM (liftIO (doesDirectoryExist path)) (updateFolder path url branch) (fillFolder path url branch)
 
-updateFolder :: String -> String -> String -> IO ()
+updateFolder :: String -> String -> String -> GitException ()
 updateFolder path url branch =
-    ifM (isRepo path url)
+    ifM (liftIO (isRepo path url))
         (doPull path branch)
         (fillFolder path url branch)
 
-fillFolder :: String -> String -> String -> IO ()
-fillFolder path url branch = removePathForcibly path >> doClone url path branch
+fillFolder :: String -> String -> String -> GitException ()
+fillFolder path url branch = liftIO (removePathForcibly path) >> doClone url path branch
 
-readJobsDatabase :: ReaderT SqlBackend IO JobTemplates
-readJobsDatabase = do
+readJobQueueDatabase :: ReaderT SqlBackend IO JobTemplates
+readJobQueueDatabase = do
     dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
     let templs = map (\(_,x,y) -> createUserTemplate x y) dataJoin
     mapM_ (delete . entityKey . fst3) dataJoin
@@ -156,7 +153,7 @@ projectUrlToPath = removeGitSuffix . after '/'
     where
         removeGitSuffix = reverse . after '.' . reverse
 
-getDatabaseJobQueue ::  ReaderT SqlBackend IO [Entity JobQueue]
+getDatabaseJobQueue :: ReaderT SqlBackend IO [Entity JobQueue]
 getDatabaseJobQueue = selectList [] [Asc JobQueueId]
 
 joinJobQueuePlaybookProject :: ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
@@ -179,7 +176,7 @@ getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
 runJobs pool jobTempls = do
-    jobTempls' <- M.union <$> updateConfigRepoJobTemplates pool jobTempls <*> runSqlPool readJobsDatabase pool --Have different timing for the two updates
+    jobTempls' <- runSqlPool (readJobQueueDatabase >>= updateConfigRepoJobTemplates) pool --Have different timing for the two updates
     snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
 ifM :: Monad m => m Bool -> m a -> m a -> m a

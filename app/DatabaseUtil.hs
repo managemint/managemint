@@ -26,6 +26,7 @@ module DatabaseUtil where
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
+import Control.Monad.Trans.Reader
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
@@ -61,11 +62,11 @@ JobQueue
     triggerDate String
 |]
 
-getProjects :: ConnectionPool -> IO [Entity Project]
-getProjects = runSqlPool (selectList [] [Asc ProjectId])
+getProjects :: ReaderT SqlBackend IO [Entity Project]
+getProjects = selectList [] [Asc ProjectId]
 
-getPlaybooks :: Key Project -> ConnectionPool -> IO [Entity Playbook]
-getPlaybooks projectid = runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId])
+getPlaybooks :: Key Project -> ReaderT SqlBackend IO [Entity Playbook]
+getPlaybooks projectid = selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]
 
 addRun :: Run -> ConnectionPool -> IO (Key Run)
 addRun run = runSqlPool (insert run)
