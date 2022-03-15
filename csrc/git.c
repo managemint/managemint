@@ -33,6 +33,8 @@
 
 #define _GIT_DEFAULT_REMOTE "origin"
 
+#define _GIT_ERRSTR_LEN 512
+
 // https://libgit2.org/docs/guides/101-samples/
 
 /* TODO
@@ -41,6 +43,7 @@
 
 git_oid glbl__merge_oid;
 int	glbl__merge_oid_set;
+char	glbl__errmsg[_GIT_ERRSTR_LEN];
 
 static int auth_callback(git_cred **out, const char *url, const char *username_from_url, unsigned int allowed_types, void *payload) {
 	// TODO other stuff
@@ -98,8 +101,15 @@ static void print_last_errstr() {
 	}
 }
 
+static void update_last_error() {
+	char* err = git_error_last()->message;
+	strncpy( glbl__errmsg, err, _GIT_ERRSTR_LEN-1 );
+}
+
 char *get_last_error() {
-	return git_error_last()->message;
+	// Be paranoid!
+	glbl__errmsg[_GIT_ERRSTR_LEN-1] = '\0';
+	return glbl__errmsg;
 }
 
 char *get_last_merge_oid() {
@@ -163,7 +173,7 @@ int do_git_clone(char* _url, char* _path, char* _refspec) {
 
 	ASSERT_GIT_CALL(git_clone(&repo, _url, _path, &clone_opts));
 
-	ret = 0;
+	ret = HSGIT_OK;
 
 end:
 	git_repository_free(repo);
@@ -206,7 +216,7 @@ int do_git_pull(char* _path, char* _refspec) {
 	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid) );
 	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
 
-	ret = 0;
+	ret = HSGIT_OK;
 
 error:
 end:
