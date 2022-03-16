@@ -33,12 +33,14 @@ foreign import capi "git.h value HSGIT_OK" c_hsgit_ok :: Int
 foreign import capi "git.h value HSGIT_CALL_FAILED" c_hsgit_call_failed :: Int
 foreign import capi "git.h value HSGIT_INCORRECT_REMOTE" c_hsgit_incorrect_remote :: Int
 foreign import capi "git.h value HSGIT_REFSPEC_NOT_MERGEABLE" c_hsgit_refspec_not_mergeable :: Int
+foreign import capi "git.h value HSGIT_NO_FF_POSSIBLE" c_hsgit_no_ff_possible :: Int
 
 internalErrstr :: Int -> String
 internalErrstr i
     | i == c_hsgit_refspec_not_mergeable = "Refspec is not mergable"
     | i == c_hsgit_incorrect_remote = "Specified remote is not set"
     | i == c_hsgit_call_failed = "libgit error"
+    | i == c_hsgit_no_ff_possible = "No Fast-Forward possible"
     | i == c_hsgit_ok = "OK"
     | otherwise = "Unknown Error: " ++ show  i
 
