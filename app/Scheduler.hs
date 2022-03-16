@@ -164,9 +164,12 @@ updateFolder oid path url branch =
 doPullPerhaps :: String -> String -> String -> IO (Either String (Bool,String))
 doPullPerhaps oid path branch = do
     pull <- doPull path branch
-    oidNew <- getLastOid --TODO Ask Jonny if this is ok -> It is not okay!!!!
-    return $ pull <&> \_ -> if oidNew == oid then (False, oid)
-                                             else (True, oidNew)
+    case pull of
+      Left err -> return $ Left err
+      Right () -> do
+          oidNew <- getLastOid
+          return $ Right $ if oidNew == oid then (False, oid)
+                                            else (True, oidNew)
 
 -- |Clones the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
