@@ -188,6 +188,7 @@ int do_git_pull(char* _path, char* _refspec) {
 	int ret = -1;
 	git_repository *repo = NULL;
 	git_remote *remote = NULL;
+	git_object *ff_target = NULL;
 
 	git_annotated_commit *heads[ 1 ] = {NULL};
 
@@ -222,12 +223,21 @@ int do_git_pull(char* _path, char* _refspec) {
 	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid) );
 	ASSERT_GIT_CALL( git_merge_analysis(&merge_analysis, &merge_pref, repo, (const git_annotated_commit **)heads, 1) );
 
+	if( merge_analysis & GIT_MERGE_ANALYSIS_UP_TO_DATE ) {
+		ret = HSGIT_OK;
+		goto end;
+	}
+
 	if( ! (merge_analysis & GIT_MERGE_ANALYSIS_FASTFORWARD) ) {
 		ret = HSGIT_NO_FF_POSSIBLE;
 		goto error;
 	}
 
-	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
+	//ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
+
+	ASSERT_GIT_CALL( git_object_lookup(&ff_target, repo, &glbl__merge_oid, GIT_OBJECT_COMMIT) );
+	ASSERT_GIT_CALL( git_checkout_tree(repo, ff_target, &checkout_opts) );
+
 	ASSERT_GIT_CALL( git_repository_head(&current_head, repo) );
 	ASSERT_GIT_CALL( git_reference_set_target(&new_head, current_head, &glbl__merge_oid, NULL) );
 
