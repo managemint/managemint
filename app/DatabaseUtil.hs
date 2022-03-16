@@ -37,8 +37,8 @@ Project
     deriving Show
 Playbook
     projectId ProjectId
+    file String
     playbookName String
-    hosts String
 Run
     playbookId PlaybookId
     status Int

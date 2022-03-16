@@ -97,7 +97,6 @@ executeJob pool job = do
 --          Nein -> nichts tun
 --  Nun Config Datei parsen (f/s) (falls ordner erneuert)
 --  Daraus Templates erstellen
---  TODO: Wenn programm neugestaretet wird (leere JobTemplates), einmal alle Templates neu erstellen
 updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templs = do
     projects <- getProjects
@@ -116,7 +115,8 @@ cleanupFoldersAndTemplates templs projects = do
 updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 updateSystemTemplate templs project = do
     let oid = projectOid $ entityVal project
-    ret <- liftIO $ getRepo oid path url branch
+    ret' <- liftIO $ getRepo oid path url branch
+    let ret = ret' <&> if null templs then \(_,x) -> (True, x) else (id :: (Bool, String) -> (Bool, String))
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
       Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
@@ -132,9 +132,9 @@ getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) te
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
-readAndParseConfigFile id _ p = do
+readAndParseConfigFile id path p = do
     testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
-    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example1", _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
+    return $ M.fromList [(path, JobTemplate{_scheduleFormat=scheduleNext, _repoPath=path, _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
 
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]
@@ -152,7 +152,7 @@ updateFolder oid path url branch =
 doPullPerhaps :: String -> String -> String -> IO (Either String (Bool,String))
 doPullPerhaps oid path branch = do
     pull <- doPull path branch
-    oidNew <- getLastOid --TODO Ask Jonny if this is ok
+    oidNew <- getLastOid --TODO Ask Jonny if this is ok -> It is not okay!!!!
     return $ pull <&> \_ -> if oidNew == oid then (False, oid)
                                              else (True, oidNew)
 
@@ -171,7 +171,7 @@ readJobQueueDatabase = do
 
 createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookPlaybookName $ entityVal play,
+    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
