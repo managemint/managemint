@@ -46,11 +46,17 @@ makeLenses ''Job
 makeLenses ''JobTemplate
 makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
-getTime :: IO LocalTime
-getTime = do
-    now <- getCurrentTime
-    timezone <- getCurrentTimeZone
-    return $ utcToLocalTime timezone now
+schedule :: ConnectionPool -> IO ()
+schedule pool = do
+    jt <- runJobs pool M.empty
+    print "Scheduler done"  -- TODO: Change only for Testing
+    return ()
+
+-- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
+runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs pool jobTempls = do
+    jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
 -- |Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
@@ -84,6 +90,9 @@ executeJob pool job = do
           success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template^.repoPath, playbookName=template^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
           let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
           put $ templates & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else ( +1))
+
+
+-- /SYSTEM JOBS/ --
 
 -- Projecte aus der Datenbank lesen
 -- Für jedes Projekt:
@@ -139,16 +148,19 @@ readAndParseConfigFile id path p = do
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]
 
+-- |Creates or updates the repo folder if necessary
 getRepo :: String -> String -> String -> String -> IO (Either String (Bool,String))
 getRepo oid path url branch =
     ifM (liftIO (doesDirectoryExist path)) (updateFolder oid path url branch) (fillFolder path url branch)
 
+-- |Updates the repo folder if necessary
 updateFolder :: String -> String -> String -> String -> IO (Either String (Bool,String))
 updateFolder oid path url branch =
     ifM (liftIO (isRepo path url))
         (doPullPerhaps oid path branch)
         (fillFolder path url branch)
 
+-- |Pulls if there is an update
 doPullPerhaps :: String -> String -> String -> IO (Either String (Bool,String))
 doPullPerhaps oid path branch = do
     pull <- doPull path branch
@@ -156,11 +168,18 @@ doPullPerhaps oid path branch = do
     return $ pull <&> \_ -> if oidNew == oid then (False, oid)
                                              else (True, oidNew)
 
+-- |Clones the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
 fillFolder path url branch = liftIO (removePathForcibly path) >> doClone url path branch >>= getOidAfterAction
 
+-- |Gets the oid after a pull or clone while respecting failures
 getOidAfterAction :: Either String () -> IO (Either String (Bool,String))
 getOidAfterAction retAction = getLastOid >>= \oid -> return $ (True,oid) <$ retAction
+
+-- \SYSTEM JOB\ --
+
+
+-- /JOB QUEUE/ --
 
 readJobQueueDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobQueueDatabase = do
@@ -194,26 +213,19 @@ joinJobQueuePlaybookProject = do
 removeIllegalJobs :: [(Entity JobQueue, Entity Playbook, Entity Project)] -> ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
 removeIllegalJobs list = return $ filter (\(_,_,x) -> null $ projectErrorMessage (entityVal x)) list
 
-getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
-getJobPlaybook playId = head <$> selectList [PlaybookId ==. playId] []
+-- \JOB QUEUE\ --
 
-getPlaybookProject :: ProjectId -> ReaderT SqlBackend IO (Entity Project)
-getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 
--- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
-runJobs pool jobTempls = do
-    jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+-- /MISC/ --
+
+getTime :: IO LocalTime
+getTime = do
+    now <- getCurrentTime
+    timezone <- getCurrentTimeZone
+    return $ utcToLocalTime timezone now
 
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM b t e = b >>= \b -> if b then t else e
-
-schedule :: ConnectionPool -> IO ()
-schedule pool = do
-    jt <- runJobs pool M.empty
-    print "Scheduler done"  -- TODO: Change only for Testing
-    return ()
 
 -- |A total version of tail . dropWhile (/= x)
 after :: Eq a => a -> [a] -> [a]
@@ -223,3 +235,5 @@ after x xs = case dropWhile (/= x) xs of
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
+
+-- \MIC\ --
