@@ -14,6 +14,7 @@
 #define HSGIT_CALL_FAILED	1
 #define HSGIT_INCORRECT_REMOTE	2
 #define HSGIT_REFSPEC_NOT_MERGEABLE 3
+#define HSGIT_NO_FF_POSSIBLE	4
 
 char *get_last_merge_oid();
 
