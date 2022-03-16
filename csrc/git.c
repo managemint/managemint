@@ -191,6 +191,12 @@ int do_git_pull(char* _path, char* _refspec) {
 
 	git_annotated_commit *heads[ 1 ] = {NULL};
 
+	git_reference *current_head = NULL;
+	git_reference *new_head = NULL;
+
+	git_merge_analysis_t merge_analysis;
+	git_merge_preference_t merge_pref;
+
 	git_fetch_options fetch_opts = GIT_FETCH_OPTIONS_INIT;
 	git_checkout_options checkout_opts = GIT_CHECKOUT_OPTIONS_INIT;
 	git_merge_options merge_opts = GIT_MERGE_OPTIONS_INIT;
@@ -214,7 +220,16 @@ int do_git_pull(char* _path, char* _refspec) {
 	}
 
 	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid) );
+	ASSERT_GIT_CALL( git_merge_analysis(&merge_analysis, &merge_pref, repo, (const git_annotated_commit **)heads, 1) );
+
+	if( ! (merge_analysis & GIT_MERGE_ANALYSIS_FASTFORWARD) ) {
+		ret = HSGIT_NO_FF_POSSIBLE;
+		goto error;
+	}
+
 	ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
+	ASSERT_GIT_CALL( git_repository_head(&current_head, repo) );
+	ASSERT_GIT_CALL( git_reference_set_target(&new_head, current_head, &glbl__merge_oid, NULL) );
 
 	ret = HSGIT_OK;
 
@@ -223,6 +238,9 @@ end:
 	git_repository_free(repo);
 	git_remote_free(remote);
 	git_annotated_commit_free(heads[0]);
+	git_reference_free(current_head);
+	git_reference_free(new_head);
+
 	git_libgit2_shutdown();
 	return ret;
 }
