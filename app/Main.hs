@@ -144,25 +144,22 @@ projectWidget (Entity projectid project) pool = do
     case resultDeleteRepo of
         FormSuccess (ButtonForm val) -> do
             runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
-            [whamlet||]
-        _ -> case projectErrorMessage project of
-                "" -> do
-                    playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-                    toWidget
-                        [whamlet|
-                            <li>
-                                <ul>
-                                    Project: #{projectUrl project} (#{projectBranch project})
-                                    <form method=post action=@{HomeR}>
-                                        ^{widgetDeleteRepo}
-                                        <button>Remove
-                                    $forall entity <- playbooks
-                                        ^{playbookWidget entity pool}
-                        |]
-                err ->  [whamlet|
-                            <font color="red">
-                                #{err}
-                        |]
+            playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+            toWidget
+                [whamlet|
+                    <li>
+                        <ul>
+                            Project: #{projectUrl project} (#{projectBranch project})
+                            <form method=post action=@{HomeR}>
+                                ^{widgetDeleteRepo}
+                                <button>Remove
+                            $if Prelude.null (projectErrorMessage project)
+                                $forall entity <- playbooks
+                                    ^{playbookWidget entity pool}
+                            $else
+                                <font color="red">
+                                    #{projectErrorMessage project}
+                |]
 
 getHomeR :: Handler Html
 getHomeR = do
