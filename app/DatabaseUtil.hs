@@ -33,6 +33,7 @@ Project
     url String
     branch String
     errorMessage String
+    oid String
     deriving Show
 Playbook
     projectId ProjectId
@@ -41,6 +42,7 @@ Playbook
 Run
     playbookId PlaybookId
     status Int
+    oid String
     triggerdate String
 Event
     task String
