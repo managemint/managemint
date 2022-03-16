@@ -41,6 +41,7 @@ Playbook
 Run
     playbookId PlaybookId
     status Int
+    oid String
     triggerdate String
 Event
     task String
