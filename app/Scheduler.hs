@@ -95,6 +95,7 @@ executeJob pool job = do
 -- /SYSTEM JOBS/ --
 
 -- Projecte aus der Datenbank lesen
+-- Nicht existente Ordner und Job Templates löschen
 -- Für jedes Projekt:
 --   Schauen ob der Ordner schon existiert:
 --     Nein -> Clone ausführen und templates entfernen (f/s)
@@ -125,11 +126,13 @@ updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO 
 updateSystemTemplate templs project = do
     let oid = projectOid $ entityVal project
     ret' <- liftIO $ getRepo oid path url branch
-    let ret = ret' <&> if null templs then \(_,x) -> (True, x) else (id :: (Bool, String) -> (Bool, String))
+    let ret = ret' <&> if null templs then \(_,x) -> (True, x) else id
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
-      Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
-                                      else return $ getTemplatesFromProject templs project
+      Right (change,oid) -> do
+        update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid]
+        if change then readAndParseConfigFile oid path project
+                  else return $ getTemplatesFromProject templs project
     where
         url = projectUrl $ entityVal project
         path = projectToPath project
