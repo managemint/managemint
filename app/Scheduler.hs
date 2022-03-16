@@ -97,18 +97,19 @@ executeJob pool job = do
 --          Nein -> nichts tun
 --  Nun Config Datei parsen (f/s) (falls ordner erneuert)
 --  Daraus Templates erstellen
+--  TODO: Wenn programm neugestaretet wird (leere JobTemplates), einmal alle Templates neu erstellen
 updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templs = do
     projects <- getProjects
-    liftIO $ cleanupFoldersAndTemplates templs $ map entityVal projects
+    liftIO $ cleanupFoldersAndTemplates templs projects
     mapM (updateSystemTemplate templs) projects <&> M.unions
 
 -- |When a project is deleted in the database remove the folder and it's job templates
-cleanupFoldersAndTemplates :: JobTemplates -> [Project] -> IO JobTemplates
+cleanupFoldersAndTemplates :: JobTemplates -> [Entity Project] -> IO JobTemplates
 cleanupFoldersAndTemplates templs projects = do
     existingFolders <- listDirectory "." >>= filterM doesDirectoryExist -- TODO: Will this path stay?
-    let remove = existingFolders \\ (map (projectUrlToPath . projectUrl) projects ++ schedulerFolders)
-    mapM_ removeDirectory remove
+    let remove = existingFolders \\ (map projectToPath projects ++ schedulerFolders)
+    mapM_ removeDirectoryRecursive remove
     return $ foldl' (flip M.delete) templs remove
 
 -- |Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
@@ -119,15 +120,15 @@ updateSystemTemplate templs project = do
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
       Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
-                                      else return $ getTemplatesFromProject templs $ entityVal project
+                                      else return $ getTemplatesFromProject templs project
     where
         url = projectUrl $ entityVal project
-        path = projectUrlToPath url
+        path = projectToPath project
         branch = projectBranch $ entityVal project
 
-getTemplatesFromProject :: JobTemplates -> Project -> JobTemplates
-getTemplatesFromProject templs project = M.filter (\t -> (t^.repoPath) == path) templs
-    where path = projectUrlToPath $ projectUrl project
+getTemplatesFromProject :: JobTemplates -> Entity Project -> JobTemplates
+getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) templs
+    where path = projectToPath project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
@@ -170,12 +171,12 @@ readJobQueueDatabase = do
 
 createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl $ entityVal proj, _playbook=playbookPlaybookName $ entityVal play,
+    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookPlaybookName $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
-projectUrlToPath :: String -> FilePath
-projectUrlToPath = removeGitSuffix . after '/'
+projectToPath :: Entity Project -> FilePath
+projectToPath p = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
     where
         removeGitSuffix = reverse . after '.' . reverse
 
