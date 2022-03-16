@@ -37,8 +37,8 @@ Project
     deriving Show
 Playbook
     projectId ProjectId
+    file String
     playbookName String
-    hosts String
 Run
     playbookId PlaybookId
     status Int
@@ -69,6 +69,12 @@ getProjects = selectList [] [Asc ProjectId]
 
 getPlaybooks :: Key Project -> ReaderT SqlBackend IO [Entity Playbook]
 getPlaybooks projectid = selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]
+
+getJobPlaybook :: Key Playbook -> ReaderT SqlBackend IO (Entity Playbook)
+getJobPlaybook playId = head <$> selectList [PlaybookId ==. playId] []
+
+getPlaybookProject :: Key Project -> ReaderT SqlBackend IO (Entity Project)
+getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 
 addRun :: Run -> ConnectionPool -> IO (Key Run)
 addRun run = runSqlPool (insert run)

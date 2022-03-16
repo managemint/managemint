@@ -46,11 +46,17 @@ makeLenses ''Job
 makeLenses ''JobTemplate
 makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
-getTime :: IO LocalTime
-getTime = do
-    now <- getCurrentTime
-    timezone <- getCurrentTimeZone
-    return $ utcToLocalTime timezone now
+schedule :: ConnectionPool -> IO ()
+schedule pool = do
+    jt <- runJobs pool M.empty
+    print "Scheduler done"  -- TODO: Change only for Testing
+    return ()
+
+-- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
+runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs pool jobTempls = do
+    jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
+    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
 
 -- |Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
@@ -85,6 +91,9 @@ executeJob pool job = do
           let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
           put $ templates & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else ( +1))
 
+
+-- /SYSTEM JOBS/ --
+
 -- Projecte aus der Datenbank lesen
 -- Für jedes Projekt:
 --   Schauen ob der Ordner schon existiert:
@@ -100,66 +109,77 @@ executeJob pool job = do
 updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templs = do
     projects <- getProjects
-    liftIO $ cleanupFoldersAndTemplates templs $ map entityVal projects
+    liftIO $ cleanupFoldersAndTemplates templs projects
     mapM (updateSystemTemplate templs) projects <&> M.unions
 
 -- |When a project is deleted in the database remove the folder and it's job templates
-cleanupFoldersAndTemplates :: JobTemplates -> [Project] -> IO JobTemplates
+cleanupFoldersAndTemplates :: JobTemplates -> [Entity Project] -> IO JobTemplates
 cleanupFoldersAndTemplates templs projects = do
     existingFolders <- listDirectory "." >>= filterM doesDirectoryExist -- TODO: Will this path stay?
-    let remove = existingFolders \\ (map (projectUrlToPath . projectUrl) projects ++ schedulerFolders)
-    mapM_ removeDirectory remove
+    let remove = existingFolders \\ (map projectToPath projects ++ schedulerFolders)
+    mapM_ removeDirectoryRecursive remove
     return $ foldl' (flip M.delete) templs remove
 
 -- |Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
 updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 updateSystemTemplate templs project = do
     let oid = projectOid $ entityVal project
-    ret <- liftIO $ getRepo oid path url branch
+    ret' <- liftIO $ getRepo oid path url branch
+    let ret = ret' <&> if null templs then \(_,x) -> (True, x) else (id :: (Bool, String) -> (Bool, String))
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
       Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
-                                      else return $ getTemplatesFromProject templs $ entityVal project
+                                      else return $ getTemplatesFromProject templs project
     where
         url = projectUrl $ entityVal project
-        path = projectUrlToPath url
+        path = projectToPath project
         branch = projectBranch $ entityVal project
 
-getTemplatesFromProject :: JobTemplates -> Project -> JobTemplates
-getTemplatesFromProject templs project = M.filter (\t -> (t^.repoPath) == path) templs
-    where path = projectUrlToPath $ projectUrl project
+getTemplatesFromProject :: JobTemplates -> Entity Project -> JobTemplates
+getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) templs
+    where path = projectToPath project
 
 -- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
-readAndParseConfigFile id _ p = do
+readAndParseConfigFile id path p = do
     testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
-    return $ M.fromList [("TestJob1", JobTemplate{_scheduleFormat=scheduleNext, _repoPath="ansible-example", _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
+    return $ M.fromList [(path, JobTemplate{_scheduleFormat=scheduleNext, _repoPath=path, _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
 
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]
 
+-- |Creates or updates the repo folder if necessary
 getRepo :: String -> String -> String -> String -> IO (Either String (Bool,String))
 getRepo oid path url branch =
     ifM (liftIO (doesDirectoryExist path)) (updateFolder oid path url branch) (fillFolder path url branch)
 
+-- |Updates the repo folder if necessary
 updateFolder :: String -> String -> String -> String -> IO (Either String (Bool,String))
 updateFolder oid path url branch =
     ifM (liftIO (isRepo path url))
         (doPullPerhaps oid path branch)
         (fillFolder path url branch)
 
+-- |Pulls if there is an update
 doPullPerhaps :: String -> String -> String -> IO (Either String (Bool,String))
 doPullPerhaps oid path branch = do
     pull <- doPull path branch
-    oidNew <- getLastOid --TODO Ask Jonny if this is ok
+    oidNew <- getLastOid --TODO Ask Jonny if this is ok -> It is not okay!!!!
     return $ pull <&> \_ -> if oidNew == oid then (False, oid)
                                              else (True, oidNew)
 
+-- |Clones the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
 fillFolder path url branch = liftIO (removePathForcibly path) >> doClone url path branch >>= getOidAfterAction
 
+-- |Gets the oid after a pull or clone while respecting failures
 getOidAfterAction :: Either String () -> IO (Either String (Bool,String))
 getOidAfterAction retAction = getLastOid >>= \oid -> return $ (True,oid) <$ retAction
+
+-- \SYSTEM JOB\ --
+
+
+-- /JOB QUEUE/ --
 
 readJobQueueDatabase :: ReaderT SqlBackend IO JobTemplates
 readJobQueueDatabase = do
@@ -170,12 +190,12 @@ readJobQueueDatabase = do
 
 createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectUrlToPath $ projectUrl $ entityVal proj, _playbook=playbookPlaybookName $ entityVal play,
+    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
-projectUrlToPath :: String -> FilePath
-projectUrlToPath = removeGitSuffix . after '/'
+projectToPath :: Entity Project -> FilePath
+projectToPath p = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
     where
         removeGitSuffix = reverse . after '.' . reverse
 
@@ -193,26 +213,19 @@ joinJobQueuePlaybookProject = do
 removeIllegalJobs :: [(Entity JobQueue, Entity Playbook, Entity Project)] -> ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
 removeIllegalJobs list = return $ filter (\(_,_,x) -> null $ projectErrorMessage (entityVal x)) list
 
-getJobPlaybook :: PlaybookId -> ReaderT SqlBackend IO (Entity Playbook)
-getJobPlaybook playId = head <$> selectList [PlaybookId ==. playId] []
+-- \JOB QUEUE\ --
 
-getPlaybookProject :: ProjectId -> ReaderT SqlBackend IO (Entity Project)
-getPlaybookProject proId = head <$> selectList [ProjectId ==. proId] []
 
--- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
-runJobs pool jobTempls = do
-    jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+-- /MISC/ --
+
+getTime :: IO LocalTime
+getTime = do
+    now <- getCurrentTime
+    timezone <- getCurrentTimeZone
+    return $ utcToLocalTime timezone now
 
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM b t e = b >>= \b -> if b then t else e
-
-schedule :: ConnectionPool -> IO ()
-schedule pool = do
-    jt <- runJobs pool M.empty
-    print "Scheduler done"  -- TODO: Change only for Testing
-    return ()
 
 -- |A total version of tail . dropWhile (/= x)
 after :: Eq a => a -> [a] -> [a]
@@ -222,3 +235,5 @@ after x xs = case dropWhile (/= x) xs of
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
+
+-- \MIC\ --
