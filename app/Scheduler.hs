@@ -111,9 +111,6 @@ cleanupFoldersAndTemplates templs projects = do
     mapM_ removeDirectory remove
     return $ foldl' (flip M.delete) templs remove
 
-projectOid :: Project -> String
-projectOid = undefined -- TODO: Remove
-
 -- |Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
 updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 updateSystemTemplate templs project = do
@@ -121,7 +118,7 @@ updateSystemTemplate templs project = do
     ret <- liftIO $ getRepo oid path url branch
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
-      Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. ""] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
+      Right (change,oid) -> if change then update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid] >> readAndParseConfigFile oid path project -- TODO: Perhaps put update in the readAndParseConfigFile function
                                       else return $ getTemplatesFromProject templs $ entityVal project
     where
         url = projectUrl $ entityVal project

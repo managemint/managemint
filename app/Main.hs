@@ -94,7 +94,7 @@ getHomeR :: Handler Html
 getHomeR = do
     ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
     case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "") >> pure ()
+        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
     App pool <- getYesod

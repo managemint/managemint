@@ -33,6 +33,7 @@ Project
     url String
     branch String
     errorMessage String
+    oid String
     deriving Show
 Playbook
     projectId ProjectId
