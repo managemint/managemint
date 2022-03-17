@@ -103,13 +103,20 @@ data TomlishType= TomlishString String
                 | TomlishInt Int
 
 data Tree a b   = Node a [Tree a b]
-                | Leave b
+                | Leave a b
 
 type TomlishTree = Tree String TomlishType
 
-parseValue :: Parser TomlishTree
-parseValue = Leave. TomlishInt <$> integral
-          <|> Leave. TomlishString <$> (char '"' *> line <* char '"')
+parseValue :: Parser TomlishType
+parseValue = TomlishInt <$> integral
+          <|> TomlishString <$> (char '"' *> line <* char '"')
 
 parseKey :: Parser TomlishTree
 parseKey =  (`Node` []) <$> alphaNum
+
+parsePath :: Parser TomlishTree
+parsePath =  parseKey
+         <|> (\s t -> Node s [t]) <$> alphaNum <* char '.' <*> parsePath
+
+parseNode :: Parser TomlishTree
+parseNode = Leave <$> (alphaNum <* skipSpaces <* char '=') <*> parseValue
