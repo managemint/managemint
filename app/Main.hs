@@ -73,7 +73,16 @@ generateStatusIndicator :: Bool -> String
 generateStatusIndicator success = "<font color=\"" ++ if success then "green" else "red" ++ "\">●</font>"
 
 eventToStatus :: Entity Event -> String
-eventToStatus (Entity eventid event) = "Success"
+eventToStatus (Entity eventid event) =  if eventIs_changed event
+                                            then "CHANGED"
+                                        else if eventIs_failed event
+                                            then "FAILED"
+                                        else if eventIs_skipped event
+                                            then "SKIPPED"
+                                        else if eventIs_unreachable event
+                                            then "UNREACHABLE"
+                                        else
+                                            "SUCCESS"
 
 hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Bool)
 hostWidget (Entity runid run) playId taskId host pool = do
