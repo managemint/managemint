@@ -13,6 +13,7 @@
 module Scheduler (schedule) where
 
 import DatabaseUtil
+import ProjectConfig
 import Git
 import Executor
 import ScheduleFormat
@@ -26,6 +27,7 @@ import Control.Monad (when)
 import Control.Monad.State
 import Control.Monad.Trans
 import Control.Monad.Trans.Reader
+import Control.Concurrent (threadDelay)
 import Database.Persist.MySQL hiding (get)
 import qualified Database.Persist.MySQL as MySQL (get)
 import System.Directory
@@ -48,15 +50,16 @@ makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
 schedule :: ConnectionPool -> IO ()
 schedule pool = do
-    jt <- runJobs pool M.empty
-    print "Scheduler done"  -- TODO: Change only for Testing
-    return ()
+    runJobs pool M.empty
 
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: ConnectionPool -> JobTemplates -> IO JobTemplates
+runJobs :: ConnectionPool -> JobTemplates -> IO ()
 runJobs pool jobTempls = do
+    liftIO $ print jobTempls -- TODO: Remove
     jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
-    snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+    js <- snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+    threadDelay 10000000
+    runJobs pool js
 
 -- |Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
@@ -98,14 +101,14 @@ executeJob pool job = do
 -- Nicht existente Ordner und Job Templates löschen
 -- Für jedes Projekt:
 --   Schauen ob der Ordner schon existiert:
---     Nein -> Clone ausführen und templates entfernen (f/s)
+--     Nein -> Clone ausführen(f/s)
 --     Ja -> Schauen ob das eine Repo ist
 --       Nein -> Ordner löschen
---               Clone ausführen und templates update (f/s)
+--               Clone ausführen (f/s)
 --       Ja   -> Schaun ob sich die oid geändert hat
 --          Ja -> Pull ausführen und templates entfernen (f/s)
 --          Nein -> nichts tun
---  Nun Config Datei parsen (f/s) (falls ordner erneuert)
+--  Nun Config Datei parsen (falls ordner erneuert)
 --  Daraus Templates erstellen
 updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templs = do
@@ -142,11 +145,16 @@ getTemplatesFromProject :: JobTemplates -> Entity Project -> JobTemplates
 getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) templs
     where path = projectToPath project
 
--- TODO: The parser has to fill the playbook table. Furthermore, if the parsing fails, returns empty Map and marks project as failed
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
-readAndParseConfigFile id path p = do
-    testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
-    return $ M.fromList [(path, JobTemplate{_scheduleFormat=scheduleNext, _repoPath=path, _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
+readAndParseConfigFile oid path p = do
+    pcs <- liftIO $ parseConfigFile path
+    if null pcs then update (entityKey p) [ProjectErrorMessage =. "Error in the config file"] >> return M.empty else do
+        keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
+        return $ M.unions $ zipWith (createTemplateFromPlaybookConfiguration oid path) keys pcs
+
+createTemplateFromPlaybookConfiguration :: String -> String -> Key Playbook -> PlaybookConfiguration -> JobTemplates
+createTemplateFromPlaybookConfiguration oid path key p = M.singleton (pName p)
+    JobTemplate{_scheduleFormat=pSchedule p, _repoPath=path, _playbook=pFile p, _playbookId=key, _failCount=0, _systemJob=True, _repoIdentifier=oid}
 
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]

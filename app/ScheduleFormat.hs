@@ -10,7 +10,7 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay) where
+module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
@@ -53,6 +53,26 @@ fullWeek = enumFromTo Monday Sunday
 
 scheduleNext :: Schedule
 scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
+
+parseScheduleFormat :: String -> Maybe Schedule
+parseScheduleFormat str = case breakOn ' ' str of
+                            (d,"")   -> Schedule <$> parseDaysFormat d <*> Just Nothing
+                            (d,str') -> Schedule <$> parseDaysFormat d <*> (Just <$> (ScheduleTime <$> parseStartTimes s <*> parseRepetitionTimes r))
+                                where (s,r)    = breakOn '/' str'
+
+parseStartTimes :: String -> Maybe [TimeOfDay]
+parseStartTimes "" = Just allFullHours
+parseStartTimes s  = parseTimes s
+
+parseRepetitionTimes :: String -> Maybe [TimeOfDay]
+parseRepetitionTimes "" = Just [TimeOfDay 0 1 0]
+parseRepetitionTimes s  = parseTimes s
+
+parseTimes :: String -> Maybe [TimeOfDay]
+parseTimes ts = nubOrd <$> mapM parseTimeOfDay (splitOn "," ts)
+
+parseTimeOfDay :: String -> Maybe TimeOfDay
+parseTimeOfDay str = readMaybe $ str ++ ":00"
 
 parseDaysFormat :: String -> Maybe [DayOfWeek]
 parseDaysFormat "" = Just $ enumFromTo Monday Sunday
@@ -118,7 +138,8 @@ prependBool b x xs = if b then x:xs else xs
 
 -- |breakOn '=' "x=1" == ("x","1")
 breakOn :: Eq a => a -> [a] -> ([a],[a])
-breakOn x = break (/= x)
+breakOn x xs = (l, drop 1 r)
+    where (l,r) = break (== x) xs
 
 iterateN :: Int -> (a -> a) -> a -> [a]
 iterateN n f x = take n $ iterate f x
