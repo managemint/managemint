@@ -19,7 +19,7 @@ import Data.Char
 -- <Key>     ::= Alphanumeric String (No Spaces)
 -- <Value>   ::= Integer Value | <Quoted String>
 -- <Quoted String> ::= "<String|c/='"'>"
--- "<String ohne quotes>"
+-- "<String ohne quotes>
 
 newtype Parser a = Parser (String -> [(a, String)])
 
@@ -76,7 +76,7 @@ digit :: Parser Int
 digit = digitToInt <$> satisfy isDigit
 
 line :: Parser String
-line = many $ notChars "\"n"
+line = many $ notChars "\"\n"
 
 alphaNum :: Parser String
 alphaNum = some $ satisfy isAlphaNum
@@ -101,15 +101,26 @@ integral = natural
 
 data TomlishType= TomlishString String
                 | TomlishInt Int
+                deriving (Show)
 
 data Tree a b   = Node a [Tree a b]
                 | Leave a b
+                deriving (Show)
 
 type TomlishTree = Tree String TomlishType
+
+addLeavesLinear :: TomlishTree -> [TomlishTree] -> TomlishTree
+addLeavesLinear (Node k []) b = Node k b
+addLeavesLinear (Node k [t]) b = Node k [addLeavesLinear t b]
+addLeavesLinear _ _ = error "addLeavesLinear undefined behaviour"
+
+-- addLeavesLinear (Node k (t:ts)) b = undefined
+-- addLeavesLinear (Leave _ _) _ = undefined
 
 parseValue :: Parser TomlishType
 parseValue = TomlishInt <$> integral
           <|> TomlishString <$> (char '"' *> line <* char '"')
+          <|> TomlishString <$> (char '\'' *> line <* char '\'')
 
 parseKey :: Parser TomlishTree
 parseKey =  (`Node` []) <$> alphaNum
@@ -118,5 +129,22 @@ parsePath :: Parser TomlishTree
 parsePath =  parseKey
          <|> (\s t -> Node s [t]) <$> alphaNum <* char '.' <*> parsePath
 
-parseNode :: Parser TomlishTree
-parseNode = Leave <$> (alphaNum <* skipSpaces <* char '=') <*> parseValue
+parseKeyValue :: Parser TomlishTree
+parseKeyValue =  Leave <$> (alphaNum <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
+
+
+parseNode :: Parser [TomlishTree]
+parseNode =  (:[]) <$> parseKeyValue
+         <|> (:) <$> (parseKeyValue <* skipNewline <* char '\n') <*> parseNode
+
+parseSegmentTop :: Parser TomlishTree
+parseSegmentTop =  char '[' *> skipSpaces *> parsePath <* skipSpaces <* char ']'
+
+parseSegment :: Parser TomlishTree
+parseSegment =  parseSegmentTop
+            <|> addLeavesLinear <$> (parseSegmentTop <* skipNewline <* char '\n') <*> parseNode
+
+parseTop :: Parser [TomlishTree]
+parseTop =  (:[]) <$> parseSegment <* skipNewline
+        <|> (:) <$> (parseSegment <* skipNewline <* char '\n') <*> parseTop
+
