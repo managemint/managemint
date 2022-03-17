@@ -1,4 +1,4 @@
-{- app/ProjectConfiguration.hs
+{- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
  -
@@ -8,21 +8,43 @@
  -
  -}
 
-module ProjectConfig where
+module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
 
 import DatabaseUtil
-import Scheduler
 import ScheduleFormat
+import TomlishParser
 
 import qualified Data.Map as M
 import Database.Persist.MySQL hiding (get)
 import Control.Monad.Trans.Reader
+import System.IO
+import Data.Maybe (mapMaybe)
+import Control.Monad.IO.Class (liftIO)
 
-data ProjectConfiguration = ProjectConfiguration
-    {
+data PlaybookConfiguration = PlaybookConfiguration
+    { pName :: String
+    , pFile :: String
+    , pSchedule :: Schedule
     }
+    deriving (Show)
 
--- readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO ProjectConfiguration
--- readAndParseConfigFile id path p = do
---     testId <- entityKey . head <$> getPlaybooks (entityKey p) -- TODO: Remove, this is only for testing
---     return $ M.fromList [(path, JobTemplate{_scheduleFormat=scheduleNext, _repoPath=path, _playbook="pb.yml", _playbookId=testId, _failCount=0, _systemJob=False, _repoIdentifier=id})]
+parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
+parseConfigFile path = do
+    contents <- readFile $ path ++ "/hansible.conf"
+    return $ case parse parseTop contents of
+               Nothing    -> []
+               Just trees -> mapMaybe parseTomlishTree trees
+
+parseTomlishTree :: TomlishTree -> Maybe PlaybookConfiguration
+parseTomlishTree (Node "run" [Node name [Leave "file" (TomlishString f), Leave "schedule" (TomlishString s)]]) =
+    case parseScheduleFormat s of
+      Nothing -> Nothing
+      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
+parseTomlishTree _ = Nothing
+
+writePlaybookInDatabase :: Key Project -> PlaybookConfiguration -> ReaderT SqlBackend IO (Key Playbook)
+writePlaybookInDatabase key p = do
+    playbooks <- getPlaybooks key
+    case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
+      []     -> insert $ Playbook key (pFile p) (pName p)
+      (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
