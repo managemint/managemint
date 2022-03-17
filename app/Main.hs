@@ -72,26 +72,23 @@ instance YesodPersist App where
 generateStatusIndicator :: Bool -> String
 generateStatusIndicator success = "<font color=\"" ++ if success then "green" else "red" ++ "\">●</font>"
 
-eventToStatus :: Entity Event -> String
-eventToStatus (Entity eventid event) =  if eventIs_changed event
-                                            then "CHANGED"
-                                        else if eventIs_failed event
-                                            then "FAILED"
-                                        else if eventIs_skipped event
-                                            then "SKIPPED"
-                                        else if eventIs_unreachable event
-                                            then "UNREACHABLE"
-                                        else
-                                            "SUCCESS"
+eventToStatus :: Entity Event -> (String, Bool)
+eventToStatus (Entity eventid event)
+  | eventIs_changed event = ("CHANGED", True)
+  | eventIs_failed event = ("FAILED", False)
+  | eventIs_skipped event = ("SKIPPED", True)
+  | eventIs_unreachable event = ("UNREACHABLE", False)
+  | otherwise = ("SUCCESS", True)
 
 hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Bool)
 hostWidget (Entity runid run) playId taskId host pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] []) pool
+    let (text, status) = eventToStatus (Data.Maybe.fromJust event)
     return (toWidget
         [whamlet|
             <li>
-                #{host}: #{eventToStatus (Data.Maybe.fromJust event)}
-        |], True)
+                #{host}: #{text}
+        |], status)
 
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
