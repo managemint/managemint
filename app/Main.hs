@@ -32,8 +32,10 @@ import Database.Persist.MySQL
 import Database.Persist.TH
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader
+import Control.Monad.State
 import Control.Concurrent.Async
 import Data.Maybe
+import Data.Foldable
 
 data AddRepository = AddRepository
         { repoURL :: Text
@@ -67,49 +69,68 @@ instance YesodPersist App where
         App pool <- getYesod
         runSqlPool action pool
 
-eventToStatus :: Entity Event -> String
-eventToStatus (Entity eventid event) = "Success"
-
-hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> Widget
-hostWidget (Entity runid run) playId taskId host pool = do
-    event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] []) pool
+generateStatusIndicator :: Bool -> Widget
+generateStatusIndicator success =
+    let s = if success then "green" else "red" ::String in
     toWidget
         [whamlet|
-            <li>
-                #{host}: #{eventToStatus (Data.Maybe.fromJust event)}
+            <font color=#{s}>
+                ●
         |]
+
+eventToStatus :: Entity Event -> (String, Bool)
+eventToStatus (Entity eventid event)
+  | eventIs_changed event = ("CHANGED", True)
+  | eventIs_failed event = ("FAILED", False)
+  | eventIs_skipped event = ("SKIPPED", True)
+  | eventIs_unreachable event = ("UNREACHABLE", False)
+  | otherwise = ("SUCCESS", True)
+
+hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Bool)
+hostWidget (Entity runid run) playId taskId host pool = do
+    event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] []) pool
+    let (text, status) = eventToStatus (Data.Maybe.fromJust event)
+    return (toWidget
+        [whamlet|
+            <li>
+                #{host}: #{text}
+        |], status)
 
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
 
-taskWidget :: Entity Run -> Int -> Int -> ConnectionPool -> Widget
+taskWidget :: Entity Run -> Int -> Int -> ConnectionPool -> IO (Widget, Bool)
 taskWidget entity@(Entity runid run) playId taskId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventRunId ==. runid] []) pool
-    hosts <- runSqlPool (getHosts runid playId taskId) pool
-    toWidget
+    hostNames <- runSqlPool (getHosts runid playId taskId) pool
+    hosts <- mapM (\x -> hostWidget entity playId taskId (unSingle x) pool) hostNames
+    let (hostWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) hosts
+    return (toWidget
         [whamlet|
             <li>
-                #{eventTask (entityVal (Data.Maybe.fromJust event))}
+                #{eventTask (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
                 <ul>
-                    $forall host <- hosts
-                        ^{hostWidget entity playId taskId (unSingle host) pool}
-        |]
+                    $forall host <- hostWidgets
+                        ^{host}
+        |], status)
 
 getTaskIds :: MonadIO m => Key Run -> Int -> ReaderT SqlBackend m [Single Int]
 getTaskIds run playId = rawSql "SELECT DISTINCT event.task_id FROM event WHERE event.run_id=? AND event.play_id=?" [toPersistValue run, toPersistValue playId]
 
-playWidget :: Entity Run -> Int -> ConnectionPool -> Widget
+playWidget :: Entity Run -> Int -> ConnectionPool -> IO (Widget, Bool)
 playWidget entity@(Entity runid run) playId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventRunId ==. runid] []) pool
     taskids <- runSqlPool (getTaskIds runid playId) pool
-    toWidget
+    tasks <- mapM (\x -> taskWidget entity playId (unSingle x) pool) taskids
+    let (taskWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) tasks
+    return (toWidget
         [whamlet|
             <li>
-                #{eventPlay (entityVal (Data.Maybe.fromJust event))}
+                #{eventPlay (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
                 <ul>
-                    $forall taskId <- taskids
-                        ^{taskWidget entity playId (unSingle taskId) pool}
-        |]
+                    $forall task <- taskWidgets
+                        ^{task}
+        |], status)
 
 getPlayIds :: MonadIO m => Key Run -> ReaderT SqlBackend m [Single Int]
 getPlayIds run = rawSql "SELECT DISTINCT event.play_id FROM event WHERE event.run_id=?" [toPersistValue run]
@@ -117,13 +138,15 @@ getPlayIds run = rawSql "SELECT DISTINCT event.play_id FROM event WHERE event.ru
 runWidget :: Entity Run -> ConnectionPool -> Widget
 runWidget entity@(Entity runid run) pool = do
     playids <- runSqlPool (getPlayIds runid) pool
+    plays <- liftIO $ mapM (\x -> playWidget entity (unSingle x) pool) playids
+    let (playWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) plays
     toWidget
         [whamlet|
             <li>
-                #{runTriggerdate run}
+                #{runTriggerdate run} ^{generateStatusIndicator status}
                 <ul>
-                    $forall playid <- playids
-                        ^{playWidget entity (unSingle playid) pool}
+                    $forall play <- playWidgets
+                        ^{play}
         |]
 
 playbookWidget :: Entity Playbook -> ConnectionPool -> Widget
@@ -145,24 +168,23 @@ projectWidget (Entity projectid project) pool = do
         FormSuccess (ButtonForm val) -> do
             runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
             [whamlet||]
-        _ -> case projectErrorMessage project of
-                "" -> do
-                    playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-                    toWidget
-                        [whamlet|
-                            <li>
-                                <ul>
-                                    Project: #{projectUrl project} (#{projectBranch project})
-                                    <form method=post action=@{HomeR}>
-                                        ^{widgetDeleteRepo}
-                                        <button>Remove
-                                    $forall entity <- playbooks
-                                        ^{playbookWidget entity pool}
-                        |]
-                err ->  [whamlet|
-                            <font color="red">
-                                #{err}
-                        |]
+        _ -> do
+            playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+            toWidget
+                [whamlet|
+                    <li>
+                        <ul>
+                            Project: #{projectUrl project} (#{projectBranch project})
+                            <form method=post action=@{HomeR}>
+                                ^{widgetDeleteRepo}
+                                <button>Remove
+                            $if Prelude.null (projectErrorMessage project)
+                                $forall entity <- playbooks
+                                    ^{playbookWidget entity pool}
+                            $else
+                                <font color="red">
+                                    #{projectErrorMessage project}
+                |]
 
 getHomeR :: Handler Html
 getHomeR = do
