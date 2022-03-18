@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
 {- app/TomlishParser.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -8,10 +9,14 @@
  -
  -}
 
-module TomlishParser where
+module TomlishParser(compileTomlish, TomlishType(..), TomlishTree, Tree(..), tomlish) where
 
 import Parser
+
 import Control.Applicative
+import Language.Haskell.TH
+import Language.Haskell.TH.Quote
+import Language.Haskell.TH.Syntax
 
 -- TODO: comments, support more types as values
 -- <Top>     ::= <Segment> \n <Top> | <Segment> | e
@@ -31,6 +36,9 @@ data Tree a b   = Node a [Tree a b]
                 deriving (Show)
 
 type TomlishTree = Tree String TomlishType
+
+compileTomlish :: String -> Maybe [TomlishTree]
+compileTomlish = parse parseTop
 
 addLeavesLinear :: TomlishTree -> [TomlishTree] -> TomlishTree
 addLeavesLinear (Node k []) b = Node k b
@@ -73,3 +81,25 @@ skipNewline = () <$ many (char '\n' <|> space)
 
 line :: Parser String
 line = many $ notChars "\"\n"
+
+--
+-- tomlish quasi-quoter
+--
+
+instance Lift TomlishType where
+    lift (TomlishString s) = appE (conE 'TomlishString) (lift s)
+    lift (TomlishInt i) = appE (conE 'TomlishInt) (lift i)
+    liftTyped = error "TomlishType liftTyped"
+
+instance (Lift a, Lift b) => Lift (Tree a b) where
+    lift (Node k v) = appE (appE (conE 'Node) (lift k)) (lift v)
+    lift (Leave k v) = appE (appE (conE 'Leave) (lift k)) (lift v)
+    liftTyped = error "Tree liftTyped"
+
+
+tomlish :: QuasiQuoter
+tomlish =  QuasiQuoter { quoteExp  = lift .  compileTomlish
+                       , quotePat  = error "tomlish"
+                       , quoteType = error "tomlish"
+                       , quoteDec  = error "tomlish"
+                       }

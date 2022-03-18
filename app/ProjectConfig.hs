@@ -32,7 +32,7 @@ data PlaybookConfiguration = PlaybookConfiguration
 parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
 parseConfigFile path = do
     contents <- readFile $ path ++ "/hansible.conf"
-    return $ case parse parseTop contents of
+    return $ case compileTomlish contents of
                Nothing    -> []
                Just trees -> mapMaybe parseTomlishTree trees
 
