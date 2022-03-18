@@ -69,24 +69,32 @@ instance YesodPersist Hansible where
         Hansible pool <- getYesod
         runSqlPool action pool
 
-generateStatusIndicator :: Bool -> Widget
+data Status = Ok | Failed | Running
+
+generateStatusIndicator :: Status -> Widget
 generateStatusIndicator success =
-    let s = if success then "green" else "red" ::String in
+    let s = case success of
+            Ok -> "green"
+            Failed -> "red"
+            Running -> "blue" ::String in
     toWidget
         [whamlet|
             <font color=#{s}>
                 ●
         |]
+joinStatus :: Status -> Status -> Status
+joinStatus Ok Ok = Ok
+joinStatus _ _ = Failed
 
-eventToStatus :: Entity Event -> (String, Bool)
+eventToStatus :: Entity Event -> (String, Status)
 eventToStatus (Entity eventid event)
-  | eventIs_changed event = ("CHANGED", True)
-  | eventIs_failed event = ("FAILED", False)
-  | eventIs_skipped event = ("SKIPPED", True)
-  | eventIs_unreachable event = ("UNREACHABLE", False)
-  | otherwise = ("SUCCESS", True)
+  | eventIs_changed event = ("CHANGED", Ok)
+  | eventIs_failed event = ("FAILED", Failed)
+  | eventIs_skipped event = ("SKIPPED", Ok)
+  | eventIs_unreachable event = ("UNREACHABLE", Failed)
+  | otherwise = ("SUCCESS", Ok)
 
-hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Bool)
+hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Status)
 hostWidget (Entity runid run) playId taskId host pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] []) pool
     let (text, status) = eventToStatus (Data.Maybe.fromJust event)
@@ -99,12 +107,12 @@ hostWidget (Entity runid run) playId taskId host pool = do
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
 
-taskWidget :: Entity Run -> Int -> Int -> ConnectionPool -> IO (Widget, Bool)
+taskWidget :: Entity Run -> Int -> Int -> ConnectionPool -> IO (Widget, Status)
 taskWidget entity@(Entity runid run) playId taskId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventRunId ==. runid] []) pool
     hostNames <- runSqlPool (getHosts runid playId taskId) pool
     hosts <- mapM (\x -> hostWidget entity playId taskId (unSingle x) pool) hostNames
-    let (hostWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) hosts
+    let (hostWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) hosts
     return (toWidget
         [whamlet|
             <li>
@@ -117,12 +125,12 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
 getTaskIds :: MonadIO m => Key Run -> Int -> ReaderT SqlBackend m [Single Int]
 getTaskIds run playId = rawSql "SELECT DISTINCT event.task_id FROM event WHERE event.run_id=? AND event.play_id=?" [toPersistValue run, toPersistValue playId]
 
-playWidget :: Entity Run -> Int -> ConnectionPool -> IO (Widget, Bool)
+playWidget :: Entity Run -> Int -> ConnectionPool -> IO (Widget, Status)
 playWidget entity@(Entity runid run) playId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventRunId ==. runid] []) pool
     taskids <- runSqlPool (getTaskIds runid playId) pool
     tasks <- mapM (\x -> taskWidget entity playId (unSingle x) pool) taskids
-    let (taskWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) tasks
+    let (taskWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) tasks
     return (toWidget
         [whamlet|
             <li>
@@ -139,7 +147,7 @@ runWidget :: Entity Run -> ConnectionPool -> Widget
 runWidget entity@(Entity runid run) pool = do
     playids <- runSqlPool (getPlayIds runid) pool
     plays <- liftIO $ mapM (\x -> playWidget entity (unSingle x) pool) playids
-    let (playWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, s && ss)) ([], True) plays
+    let (playWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) plays
     toWidget
         [whamlet|
             <li>
