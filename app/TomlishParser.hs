@@ -19,11 +19,13 @@ import Control.Applicative
 -- <Node>    ::= <Key> = <Value> \n <Node> | <Key> = <Value>
 -- <Path>    ::= <Key>.<Path> | <Key>
 -- <Key>     ::= Alphanumeric String (No Spaces)
--- <Value>   ::= Integer Value | <Quoted String>
+-- <Value>   ::= Integer Value | <Quoted String> | [ <Values> ]
+-- <Values>  ::= e | <Value>, <Values>
 -- <Quoted String> ::= " String ohne Quotes und Newline "
 
 data TomlishType= TomlishString String
                 | TomlishInt Int
+                | TomlishList [TomlishType]
                 deriving (Show)
 
 data Tree a b   = Node a [Tree a b]
@@ -41,6 +43,12 @@ parseValue :: Parser TomlishType
 parseValue = TomlishInt <$> integral
           <|> TomlishString <$> (char '"' *> line <* char '"')
           <|> TomlishString <$> (char '\'' *> line <* char '\'')
+          <|> TomlishList [] <$ (char '[' <* skipSpaces <* char ']')
+          <|> TomlishList <$> (char '[' *> parseList <* char ']')
+
+parseList :: Parser [TomlishType]
+parseList =  (:[]) <$> parseValue
+         <|> (:)  <$> (skipSpaces *> parseValue <* skipSpaces <* char ',') <*> (skipSpaces *> parseList <* skipSpaces)
 
 parseKey :: Parser TomlishTree
 parseKey =  (`Node` []) <$> alphaNum
