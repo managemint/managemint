@@ -151,11 +151,20 @@ runWidget entity@(Entity runid run) pool = do
 
 playbookWidget :: Entity Playbook -> ConnectionPool -> Widget
 playbookWidget (Entity playbookid playbook) pool = do
+    ((resultRunPlaybook, widgetRunPlaybook), enctype) <- runFormPost $ identifyForm (pack ("runPlaybook" ++ show (fromSqlKey playbookid))) $ buttonForm (fromIntegral (fromSqlKey playbookid))
+    case resultRunPlaybook of
+        FormSuccess (ButtonForm val) -> do
+          runSqlPool (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "") pool
+          return ()
+        _ -> return ()
     runs <- runSqlPool (selectList [RunPlaybookId ==. playbookid] [Asc RunId]) pool
     toWidget
         [whamlet|
             <li>
                 #{playbookPlaybookName playbook}
+                <form method=post action=@{HomeR}>
+                    ^{widgetRunPlaybook}
+                    <button>Run
                 <ul>
                     $forall entity <- runs
                         ^{runWidget entity pool}
