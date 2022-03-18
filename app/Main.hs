@@ -109,7 +109,7 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
         [whamlet|
             <li>
                 #{eventTask (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
-                <ul>
+                <ul class="hosts">
                     $forall host <- hostWidgets
                         ^{host}
         |], status)
@@ -127,7 +127,7 @@ playWidget entity@(Entity runid run) playId pool = do
         [whamlet|
             <li>
                 #{eventPlay (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
-                <ul>
+                <ul class="tasks">
                     $forall task <- taskWidgets
                         ^{task}
         |], status)
@@ -144,7 +144,7 @@ runWidget entity@(Entity runid run) pool = do
         [whamlet|
             <li>
                 #{runTriggerdate run} ^{generateStatusIndicator status}
-                <ul>
+                <ul class="plays">
                     $forall play <- playWidgets
                         ^{play}
         |]
@@ -165,7 +165,7 @@ playbookWidget (Entity playbookid playbook) pool = do
                 <form method=post action=@{HomeR}>
                     ^{widgetRunPlaybook}
                     <button>Run
-                <ul>
+                <ul class="runs">
                     $forall entity <- runs
                         ^{runWidget entity pool}
         |]
@@ -182,7 +182,7 @@ projectWidget (Entity projectid project) pool = do
             toWidget
                 [whamlet|
                     <li>
-                        <ul>
+                        <ul class="playbooks">
                             Project: #{projectUrl project} (#{projectBranch project})
                             <form method=post action=@{HomeR}>
                                 ^{widgetDeleteRepo}
@@ -205,7 +205,7 @@ getHomeR = do
     Hansible pool <- getYesod
     defaultLayout
         [whamlet|
-            <ul>
+            <ul class="projects">
                 $forall entity <- projects
                     ^{projectWidget entity pool}
         <form method=post action=@{HomeR} enctype=#{enctype}>
