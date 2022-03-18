@@ -37,7 +37,7 @@ parseConfigFile path = do
                Just trees -> mapMaybe parseTomlishTree trees
 
 parseTomlishTree :: TomlishTree -> Maybe PlaybookConfiguration
-parseTomlishTree (Node "run" [Node name [Leave "file" (TomlishString f), Leave "schedule" (TomlishString s)]]) =
+parseTomlishTree (Node (TomlishKey "run") [Node (TomlishKey name) [Leave (TomlishKey "file") (TomlishString f), Leave (TomlishKey "schedule") (TomlishString s)]]) =
     case parseScheduleFormat s of
       Nothing -> Nothing
       Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}

@@ -9,7 +9,7 @@
  -
  -}
 
-module TomlishParser(compileTomlish, TomlishType(..), TomlishTree, Tree(..), tomlish) where
+module TomlishParser(compileTomlish, TomlishType(..), TomlishTree, Tree(..), TomlishKey(..), tomlish) where
 
 import Parser
 
@@ -27,15 +27,21 @@ import Language.Haskell.TH.Syntax
 -- <Value>   ::= Integer Value | <Quoted String>
 -- <Quoted String> ::= " String ohne Quotes und Newline "
 
+data TomlishKey = TomlishKey String
+                | TomlishAntiKey String
+                deriving (Show)
+
 data TomlishType= TomlishString String
+                | TomlishAntiString String
                 | TomlishInt Int
+                | TomlishAntiInt String
                 deriving (Show)
 
 data Tree a b   = Node a [Tree a b]
                 | Leave a b
                 deriving (Show)
 
-type TomlishTree = Tree String TomlishType
+type TomlishTree = Tree TomlishKey TomlishType
 
 compileTomlish :: String -> Maybe [TomlishTree]
 compileTomlish = parse parseTop
@@ -49,16 +55,22 @@ parseValue :: Parser TomlishType
 parseValue = TomlishInt <$> integral
           <|> TomlishString <$> (char '"' *> line <* char '"')
           <|> TomlishString <$> (char '\'' *> line <* char '\'')
+          <|> TomlishAntiString <$> (char '$' *> hsVarName)
+          <|> TomlishAntiInt <$> (char '€' *> hsVarName)
 
 parseKey :: Parser TomlishTree
-parseKey =  (`Node` []) <$> alphaNum
+parseKey =  (`Node` []) <$> parseTomlishKey
+
+parseTomlishKey :: Parser TomlishKey
+parseTomlishKey =  TomlishKey <$> alphaNum
+               <|> TomlishAntiKey <$> (char '$' *> hsVarName)
 
 parsePath :: Parser TomlishTree
 parsePath =  parseKey
-         <|> (\s t -> Node s [t]) <$> alphaNum <* char '.' <*> parsePath
+         <|> (\s t -> Node s [t]) <$> parseTomlishKey <* char '.' <*> parsePath
 
 parseKeyValue :: Parser TomlishTree
-parseKeyValue =  Leave <$> (alphaNum <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
+parseKeyValue =  Leave <$> (parseTomlishKey <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
 
 
 parseNode :: Parser [TomlishTree]
@@ -85,10 +97,17 @@ line = many $ notChars "\"\n"
 --
 -- tomlish quasi-quoter
 --
+--
+instance Lift TomlishKey where
+    lift (TomlishKey s) = appE (conE 'TomlishKey) (lift s)
+    lift (TomlishAntiKey s) = appE (conE 'TomlishKey) (unboundVarE (mkName s))
+    liftTyped = error "TomlishKey liftTyped"
 
 instance Lift TomlishType where
     lift (TomlishString s) = appE (conE 'TomlishString) (lift s)
+    lift (TomlishAntiString s) = appE (conE 'TomlishString) (unboundVarE (mkName s))
     lift (TomlishInt i) = appE (conE 'TomlishInt) (lift i)
+    lift (TomlishAntiInt s) = appE (conE 'TomlishInt) (unboundVarE (mkName s))
     liftTyped = error "TomlishType liftTyped"
 
 instance (Lift a, Lift b) => Lift (Tree a b) where
@@ -98,7 +117,7 @@ instance (Lift a, Lift b) => Lift (Tree a b) where
 
 
 tomlish :: QuasiQuoter
-tomlish =  QuasiQuoter { quoteExp  = lift .  compileTomlish
+tomlish =  QuasiQuoter { quoteExp  = lift . compileTomlish
                        , quotePat  = error "tomlish"
                        , quoteType = error "tomlish"
                        , quoteDec  = error "tomlish"
