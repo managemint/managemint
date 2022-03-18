@@ -17,23 +17,18 @@ import Data.Time.Calendar.Compat
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
 import Data.Functor ((<&>))
-import Data.List (intercalate)
+import Data.List (intercalate, nub)
 import Data.List.Split (splitOn)
-import Data.Containers.ListUtils
 import Control.Lens
+import Control.Applicative
 import Text.Read
+import Parser
 
 data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime}
 data ScheduleTime =
     ScheduleTime { _startTime :: [TimeOfDay]
                  , _repetitionTime :: [TimeOfDay]
                  }
-
--- Für Parser:
---   Format: [day(s)] [[start-time(s)][/repetition-time(s)]]
---     Wenn [/repetition-time(s)] nicht gegeben ist, lese alle 24h ein
---     Sodersyntax schon beim Parsen auflößen, z.B. *:00 zu 0:00,1:00,...,23:00
--- Idee: splitOn ' ' und '/' und seperat parsen
 
 makeLenses ''Schedule
 makeLenses ''ScheduleTime
@@ -55,59 +50,94 @@ scheduleNext :: Schedule
 scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
 
--- _ means space here
+-- '_' means space here
 -- <Top>      ::= <Weekdays> | <Weeksdays> _ <Times> | <Times>
 -- <Weekdays> ::= <List(Enum(Day))>
 -- <List(A)>  ::= A | A , <List(A)>
 -- <Enum(A)>  ::= <A> .. <Enum(A)> | <A>
--- <Day>      ::= mon | tue | wen | thu | fri | sat | sun
--- <Times>    ::= <Start> | / <Rep> | <Start> / <Rep>
--- <Start>    ::= e | <List(Enum(Time))>
--- <Rep>      ::= e | <List(Enum(Time))>
--- <Time>     ::= <Hour> : <Min> | <Min>
+-- <Day>      ::= mon | tue | wed | thu | fri | sat | sun
+-- <Times>    ::= <List(Time)> | / <List(Time)> | <List(Time)> / <List(Time)>
+-- <Time>     ::= <Hour> : <Min> | <Min'>
 -- <HourSym>  ::= 00 | 01 .. 24
--- <Min>      ::= 0 | 1 .. 9 | 00 | 01 .. 60
+-- <Min>      ::= 00 | 01 .. 60
+-- <Min'>     ::= 0 | 1 .. 60
+
+parseList :: Eq a => Parser a -> Parser [a]
+parseList p = parseList' p $ parseList p
+
+parseList' :: Eq a => Parser a -> Parser [a] -> Parser [a]
+parseList' p p' = (:[]) <$> p
+              <|> (:) <$> p <*> (char ',' *> p')
 
 parseScheduleFormat :: String -> Maybe Schedule
-parseScheduleFormat str = case breakOn ' ' str of
-                            (d,"")   -> Schedule <$> parseDaysFormat d <*> Just Nothing
-                            (d,str') -> Schedule <$> parseDaysFormat d <*> (Just <$> (ScheduleTime <$> parseStartTimes s <*> parseRepetitionTimes r))
-                                where (s,r)    = breakOn '/' str'
+parseScheduleFormat = parse parseSchedule
 
-parseStartTimes :: String -> Maybe [TimeOfDay]
-parseStartTimes "" = Just allFullHours
-parseStartTimes s  = parseTimes s
+parseSchedule :: Parser Schedule
+parseSchedule = flip Schedule Nothing <$> parseWeekdays
+            <|> Schedule fullWeek . Just <$> parseTimes
+            <|> (\w t -> Schedule w (Just t)) <$> parseWeekdays <*> (char ' ' *> parseTimes)
 
-parseRepetitionTimes :: String -> Maybe [TimeOfDay]
-parseRepetitionTimes "" = Just [TimeOfDay 0 1 0]
-parseRepetitionTimes s  = parseTimes s
+parseEnum :: Eq a => Enum a => Parser a -> Parser [a]
+parseEnum p = (:[]) <$> p
+          <|> (enumFromTo <$> p <*> (keyword ".." *> p))
 
-parseTimes :: String -> Maybe [TimeOfDay]
-parseTimes ts = nubOrd <$> mapM parseTimeOfDay (splitOn "," ts)
+parseWeekdays :: Parser [DayOfWeek]
+parseWeekdays = concat <$> parseList (parseEnum parseDay)
 
-parseTimeOfDay :: String -> Maybe TimeOfDay
-parseTimeOfDay str = readMaybe $ str ++ ":00"
+parseDay :: Parser DayOfWeek
+parseDay = Monday    <$ keyword "mon"
+       <|> Tuesday   <$ keyword "tue"
+       <|> Wednesday <$ keyword "wed"
+       <|> Thursday  <$ keyword "thu"
+       <|> Friday    <$ keyword "fri"
+       <|> Saturday  <$ keyword "sat"
+       <|> Sunday    <$ keyword "sun"
 
-parseDaysFormat :: String -> Maybe [DayOfWeek]
-parseDaysFormat "" = Just $ enumFromTo Monday Sunday
-parseDaysFormat ds = nubOrd . concat <$> mapM parseEnumDays (splitOn "," ds)
-    where
-        parseEnumDays :: String -> Maybe [DayOfWeek]
-        parseEnumDays s = case splitOn ".." s of
-                         [x]   -> parseDayOfWeek x <&> (:[])
-                         [l,r] -> enumFromTo <$> parseDayOfWeek l <*> parseDayOfWeek r
-                         _     -> Nothing
+parseTimes :: Parser ScheduleTime
+parseTimes = ScheduleTime <$> parseStart <*> (char '/' *> parseRepetition)
+         <|> flip ScheduleTime [TimeOfDay 0 1 0] <$> parseStart
+         <|> ScheduleTime allFullHours <$> (char '/' *> parseRepetition)
 
-parseDayOfWeek :: String -> Maybe DayOfWeek
-parseDayOfWeek s = case s of
-                     "mon" -> Just Monday
-                     "tue" -> Just Tuesday
-                     "wen" -> Just Wednesday
-                     "thu" -> Just Thursday
-                     "fri" -> Just Friday
-                     "sat" -> Just Saturday
-                     "sun" -> Just Sunday
-                     _     -> Nothing
+parseStart :: Parser [TimeOfDay]
+parseStart = nub <$> ((++) <$> parseStartMinutes <*> (char ',' *> parseStart))
+         <|> nub <$> parseStartMinutes
+
+parseStartMinutes :: Parser [TimeOfDay]
+parseStartMinutes = (\m -> map (`addTimeOfDay` TimeOfDay 0 m 0) allFullHours) <$> parseMin'
+                <|> (:[]) <$> parseTimeOfDay
+
+parseRepetition :: Parser [TimeOfDay]
+parseRepetition = nub <$> parseList' parseRepetitionMinutes parseRepetition
+              <|> (:[]) <$> parseRepetitionMinutes
+
+parseRepetitionMinutes :: Parser TimeOfDay
+parseRepetitionMinutes = (\m -> TimeOfDay 0 m 0) <$> parseMin'
+                     <|> parseTimeOfDay
+
+parseTimeOfDay :: Parser TimeOfDay
+parseTimeOfDay = TimeOfDay <$> parseHour <*> (char ':' *> parseMin) <*> pure 0
+
+parseHour :: Parser Int
+parseHour = parseBetween 0 24
+
+parseMin :: Parser Int
+parseMin = parseBetween 0 60
+
+parseMin' :: Parser Int
+parseMin' = helper 1 <|> helper 2
+    where helper n = Parser $ \s -> let (m,r) = splitAt n s
+                                    in case readMaybe m of
+                                         Just int -> [(int,r) | 0 <= int && int < 60]
+                                         _        -> []
+
+-- |Parses a Int greater equal than the lower und smaller than the upper bound
+--parse (parseBetween 0 60) "5"  == Nothing
+--parse (parseBetween 0 60) "05" == Just 5
+parseBetween :: Int -> Int -> Parser Int
+parseBetween l u = Parser $ \s -> let (m,r) = splitAtExactly (length (show u)) s
+                                  in case readMaybe m of
+                                       Just int -> [(int,r) | l <= int && int < u]
+                                       _        -> []
 
 -- |Given a time and a Schedule expression, calculates the soonest time that matches the expression
 nextInstance :: LocalTime -> Schedule -> LocalTime
@@ -150,10 +180,10 @@ firstDayOfWeekAfter weekday day = firstDayOfWeekOnAfter weekday (addDays 1 day)
 prependBool :: Bool -> a -> [a] -> [a]
 prependBool b x xs = if b then x:xs else xs
 
--- |breakOn '=' "x=1" == ("x","1")
-breakOn :: Eq a => a -> [a] -> ([a],[a])
-breakOn x xs = (l, drop 1 r)
-    where (l,r) = break (== x) xs
-
 iterateN :: Int -> (a -> a) -> a -> [a]
 iterateN n f x = take n $ iterate f x
+
+-- |splitAtExactly 2 "12:00" == ("12","00"), but splitAtExactly 2 "1" == ("","1")
+splitAtExactly :: Int -> [a] -> ([a],[a])
+splitAtExactly n list = if length l < n then ([], list) else (l,r)
+    where (l,r) = splitAt n list
