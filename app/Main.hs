@@ -69,8 +69,14 @@ instance YesodPersist App where
         App pool <- getYesod
         runSqlPool action pool
 
-generateStatusIndicator :: Bool -> String
-generateStatusIndicator success = "<font color=\"" ++ if success then "green" else "red" ++ "\">●</font>"
+generateStatusIndicator :: Bool -> Widget
+generateStatusIndicator success =
+    let s = if success then "green" else "red" ::String in
+    toWidget
+        [whamlet|
+            <font color=#{s}>
+                ●
+        |]
 
 eventToStatus :: Entity Event -> (String, Bool)
 eventToStatus (Entity eventid event)
@@ -102,7 +108,7 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
     return (toWidget
         [whamlet|
             <li>
-                #{eventTask (entityVal (Data.Maybe.fromJust event))} #{generateStatusIndicator status}
+                #{eventTask (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
                 <ul>
                     $forall host <- hostWidgets
                         ^{host}
@@ -120,7 +126,7 @@ playWidget entity@(Entity runid run) playId pool = do
     return (toWidget
         [whamlet|
             <li>
-                #{eventPlay (entityVal (Data.Maybe.fromJust event))} #{generateStatusIndicator status}
+                #{eventPlay (entityVal (Data.Maybe.fromJust event))} ^{generateStatusIndicator status}
                 <ul>
                     $forall task <- taskWidgets
                         ^{task}
@@ -137,7 +143,7 @@ runWidget entity@(Entity runid run) pool = do
     toWidget
         [whamlet|
             <li>
-                #{runTriggerdate run} #{generateStatusIndicator status}
+                #{runTriggerdate run} ^{generateStatusIndicator status}
                 <ul>
                     $forall play <- playWidgets
                         ^{play}
