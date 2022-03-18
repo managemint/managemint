@@ -27,6 +27,7 @@ import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
 import Control.Monad.Trans.Reader
+import Yesod.Static
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
@@ -82,5 +83,5 @@ addRun run = runSqlPool (insert run)
 addEvent :: Event -> ConnectionPool -> IO (Key Event)
 addEvent event = runSqlPool (insert event)
 
-newtype Hansible = Hansible{ connections :: ConnectionPool }
+data Hansible = Hansible{ connections :: ConnectionPool, getStatic :: Static }
 

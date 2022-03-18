@@ -26,6 +26,7 @@
 import Scheduler
 import Data.Text
 import Yesod
+import Yesod.Static
 import DatabaseUtil
 import Database.Persist
 import Database.Persist.MySQL
@@ -53,8 +54,13 @@ newtype ButtonForm = ButtonForm
 buttonForm val = renderDivs $ ButtonForm
         <$> areq hiddenField "" (Just val)
 
+staticFilePath= "static"
+
+staticFiles "static"
+
 mkYesod "Hansible" [parseRoutes|
 / HomeR GET POST
+/static StaticR Static getStatic
 |]
 
 instance Yesod Hansible
@@ -66,7 +72,7 @@ instance YesodPersist Hansible where
     type YesodPersistBackend Hansible = SqlBackend
 
     runDB action = do
-        Hansible pool <- getYesod
+        Hansible pool _ <- getYesod
         runSqlPool action pool
 
 data Status = Ok | Failed | Running
@@ -208,6 +214,11 @@ projectWidget (Entity projectid project) pool = do
                                     #{projectErrorMessage project}
                 |]
 
+hansibleStyle :: Widget -> Widget
+hansibleStyle inp = do
+    addStylesheet $ StaticR style_css
+    inp
+
 getHomeR :: Handler Html
 getHomeR = do
     ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
@@ -215,8 +226,9 @@ getHomeR = do
         FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
-    Hansible pool <- getYesod
+    Hansible pool _ <- getYesod
     defaultLayout
+      (hansibleStyle
         [whamlet|
             <ul class="projects">
                 $forall entity <- projects
@@ -224,13 +236,15 @@ getHomeR = do
         <form method=post action=@{HomeR} enctype=#{enctype}>
             ^{widgetAddRepo}
             <button>Add
-        |]
+        |])
 
 postHomeR :: Handler Html
 postHomeR = getHomeR
 
 runWebserver :: ConnectionPool -> IO ()
-runWebserver conn = warp 3000 Hansible { connections = conn }
+runWebserver conn = do
+    x <- static staticFilePath
+    warp 3000 Hansible { connections = conn, getStatic = x }
 
 
 connectionInfo :: ConnectInfo
