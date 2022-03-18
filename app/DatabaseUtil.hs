@@ -82,5 +82,5 @@ addRun run = runSqlPool (insert run)
 addEvent :: Event -> ConnectionPool -> IO (Key Event)
 addEvent event = runSqlPool (insert event)
 
-newtype App = App { connections :: ConnectionPool }
+newtype Hansible = Hansible{ connections :: ConnectionPool }
 

@@ -53,20 +53,20 @@ newtype ButtonForm = ButtonForm
 buttonForm val = renderDivs $ ButtonForm
         <$> areq hiddenField "" (Just val)
 
-mkYesod "App" [parseRoutes|
+mkYesod "Hansible" [parseRoutes|
 / HomeR GET POST
 |]
 
-instance Yesod App
+instance Yesod Hansible
 
-instance RenderMessage App FormMessage where
+instance RenderMessage Hansible FormMessage where
     renderMessage _ _ = defaultFormMessage
 
-instance YesodPersist App where
-    type YesodPersistBackend App = SqlBackend
+instance YesodPersist Hansible where
+    type YesodPersistBackend Hansible = SqlBackend
 
     runDB action = do
-        App pool <- getYesod
+        Hansible pool <- getYesod
         runSqlPool action pool
 
 generateStatusIndicator :: Bool -> Widget
@@ -193,7 +193,7 @@ getHomeR = do
         FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
         _ -> pure ()
     projects <- runDB $ selectList [] [Asc ProjectId]
-    App pool <- getYesod
+    Hansible pool <- getYesod
     defaultLayout
         [whamlet|
             <ul>
@@ -208,7 +208,7 @@ postHomeR :: Handler Html
 postHomeR = getHomeR
 
 runWebserver :: ConnectionPool -> IO ()
-runWebserver conn = warp 3000 App { connections = conn }
+runWebserver conn = warp 3000 Hansible { connections = conn }
 
 
 connectionInfo :: ConnectInfo
