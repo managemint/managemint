@@ -13,6 +13,7 @@ module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybook
 import DatabaseUtil
 import ScheduleFormat
 import TomlishParser
+import Parser
 
 import qualified Data.Map as M
 import Database.Persist.MySQL hiding (get)

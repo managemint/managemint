@@ -54,6 +54,20 @@ fullWeek = enumFromTo Monday Sunday
 scheduleNext :: Schedule
 scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
+
+-- _ means space here
+-- <Top>      ::= <Weekdays> | <Weeksdays> _ <Times> | <Times>
+-- <Weekdays> ::= <List(Enum(Day))>
+-- <List(A)>  ::= A | A , <List(A)>
+-- <Enum(A)>  ::= <A> .. <Enum(A)> | <A>
+-- <Day>      ::= mon | tue | wen | thu | fri | sat | sun
+-- <Times>    ::= <Start> | / <Rep> | <Start> / <Rep>
+-- <Start>    ::= e | <List(Enum(Time))>
+-- <Rep>      ::= e | <List(Enum(Time))>
+-- <Time>     ::= <Hour> : <Min> | <Min>
+-- <HourSym>  ::= 00 | 01 .. 24
+-- <Min>      ::= 0 | 1 .. 9 | 00 | 01 .. 60
+
 parseScheduleFormat :: String -> Maybe Schedule
 parseScheduleFormat str = case breakOn ' ' str of
                             (d,"")   -> Schedule <$> parseDaysFormat d <*> Just Nothing
