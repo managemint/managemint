@@ -147,7 +147,12 @@ runWidget :: Entity Run -> ConnectionPool -> Widget
 runWidget entity@(Entity runid run) pool = do
     playids <- runSqlPool (getPlayIds runid) pool
     plays <- liftIO $ mapM (\x -> playWidget entity (unSingle x) pool) playids
-    let (playWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) plays
+    let (playWidgets, _treeStatus) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) plays
+    let status = case runStatus run of
+                    -1 -> Failed
+                    0 -> Ok
+                    1 -> Running
+                    _ -> Failed
     toWidget
         [whamlet|
             <li>
