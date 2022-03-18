@@ -47,8 +47,8 @@ parseValue = TomlishInt <$> integral
           <|> TomlishList <$> (char '[' *> parseList <* char ']')
 
 parseList :: Parser [TomlishType]
-parseList =  (:[]) <$> parseValue
-         <|> (:)  <$> (skipSpaces *> parseValue <* skipSpaces <* char ',') <*> (skipSpaces *> parseList <* skipSpaces)
+parseList =  (:[]) <$> (skipSpaces *> parseValue <* skipSpaces)
+         <|> (:)  <$> (skipSpaces *> parseValue <* skipSpaces <* char ',') <*> parseList
 
 parseKey :: Parser TomlishTree
 parseKey =  (`Node` []) <$> alphaNum
