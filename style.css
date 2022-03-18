@@ -1,0 +1,94 @@
+:root {
+	--bg: #fff;
+	--primary: #000;
+	--secondary: #aaa;
+	--highlight: blue;
+
+	--font-family: "sans-serif";
+
+	/* Status Colors */
+	--status-running: blue;
+	--status-ok: green;
+	--status-failed: red;
+	--status-changed: yellow;
+}
+
+
+html {
+	background: var(--bg);
+	color: var(--primary);
+	font-family: var(--font-family);
+}
+
+body {
+}
+
+ul {
+	/*margin-left: 20px;
+	list-style-position: inside;*/
+	color: var(--primary);
+	margin-bottom: 0px;
+	padding-left: 30px;
+	list-style: '∟';
+}
+
+/* Liste an hosts hat class hosts */
+ul.hosts {
+	margin-bottom: 5px;
+}
+
+ul.tasks {
+	margin-bottom: 10px;
+}
+
+ul.plays {
+	margin-bottom: 20px;
+}
+
+ul.runs {
+	color: var(--highlight);
+}
+
+ul.runs {
+}
+
+ul.projects {
+}
+
+form {
+	display: inline;
+}
+
+button {
+	border: none;
+}
+
+div.required {
+	display: inline;
+}
+
+
+.status-running {
+	color: var(--status-running);
+}
+
+.status-ok {
+	color: var(--status-ok);
+}
+
+.status-failed {
+	color: var(--bg);
+	background-color: var(--status-failed);
+}
+
+.status-changed {
+	color: var(--status-changed);
+}
+
+.secondary {
+	color: var(--secondary)
+}
+
+.highlight {
+	color: var(--highlight)
+}
