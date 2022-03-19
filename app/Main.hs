@@ -77,14 +77,15 @@ instance YesodPersist Hansible where
         Hansible pool _ <- getYesod
         runSqlPool action pool
 
-data Status = Ok | Failed | Running
+data Status = Ok | Failed | FailedIgnored | Running
 
 generateStatusIndicator :: Status -> Widget
 generateStatusIndicator success =
     let s = case success of
             Ok -> "green"
             Failed -> "red"
-            Running -> "blue" ::String in
+            Running -> "blue"
+            FailedIgnored -> "#FA5858" :: String in
     toWidget
         [whamlet|
             <font color=#{s}>
@@ -100,25 +101,44 @@ statusIntToStatus x = case x of
 
 joinStatus :: Status -> Status -> Status
 joinStatus Ok Ok = Ok
+joinStatus FailedIgnored x = x
+joinStatus x FailedIgnored = x
 joinStatus _ _ = Failed
 
-eventToStatus :: Entity Event -> (String, Status)
-eventToStatus (Entity eventid event)
+eventToStatus :: Event -> (String, Status)
+eventToStatus event
   | eventIs_changed event = ("CHANGED", Ok)
+  | eventIs_failed event && eventIgnore_errors event = ("FAILED(IGNORED)", FailedIgnored)
   | eventIs_failed event = ("FAILED", Failed)
   | eventIs_skipped event = ("SKIPPED", Ok)
   | eventIs_unreachable event = ("UNREACHABLE", Failed)
   | otherwise = ("SUCCESS", Ok)
 
+itemWidget :: Entity Event -> IO (Widget, Status)
+itemWidget (Entity eventid event) = do
+    let (text, status) = eventToStatus event
+    return (toWidget [whamlet|#{eventItem event}: #{text}|], status)
+
 hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Status)
 hostWidget (Entity runid run) playId taskId host pool = do
-    event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] []) pool
-    let (text, status) = eventToStatus (Data.Maybe.fromJust event)
-    return (toWidget
-        [whamlet|
-            <li>
-                #{host}: #{text}
-        |], status)
+    isItemized <- runSqlPool (exists [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid, EventIs_item ==. True]) pool
+    -- Either single element or sublist in case of items
+    if isItemized then
+        do
+            events <- runSqlPool (selectList [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid, EventIs_item ==. True] [Asc EventId]) pool
+            items <- mapM itemWidget events
+            let (hostWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) items
+            return (toWidget [whamlet|
+                <ul>
+                    $forall x <- hostWidgets
+                        <li>
+                            ^{x}
+            |], status)
+    else
+        do
+            event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] [Asc EventId]) pool
+            let (text, status) = eventToStatus (entityVal (fromJust event))
+            return (toWidget [whamlet|#{eventHost (entityVal (fromJust event))}: #{text}|], status)
 
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
