@@ -83,3 +83,6 @@ natural = accum <$> some digit
 integral :: Parser Int
 integral = natural
         <|> (\i -> (-1)*i) <$> (char '-' *> natural)
+
+hsVarName :: Parser String
+hsVarName = (:) <$> satisfy isLower <*> many (satisfy isAlpha)
