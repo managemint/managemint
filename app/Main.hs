@@ -84,8 +84,8 @@ generateStatusIndicator success =
     let s = case success of
             Ok -> "green"
             Failed -> "red"
-            Running -> "blue" ::String
-            FailedIgnored -> "#FA5858" in
+            Running -> "blue"
+            FailedIgnored -> "#FA5858" :: String in
     toWidget
         [whamlet|
             <font color=#{s}>
@@ -108,10 +108,10 @@ joinStatus _ _ = Failed
 eventToStatus :: Event -> (String, Status)
 eventToStatus event
   | eventIs_changed event = ("CHANGED", Ok)
+  | eventIs_failed event && eventIgnore_errors event = ("FAILED(IGNORED)", FailedIgnored)
   | eventIs_failed event = ("FAILED", Failed)
   | eventIs_skipped event = ("SKIPPED", Ok)
   | eventIs_unreachable event = ("UNREACHABLE", Failed)
-  | eventIs_failed event && eventIgnore_errors event = ("ERROR(Ignored)", FailedIgnored)
   | otherwise = ("SUCCESS", Ok)
 
 itemWidget :: Entity Event -> IO (Widget, Status)
