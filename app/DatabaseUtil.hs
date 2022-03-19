@@ -37,11 +37,11 @@ Project
     oid String
     deriving Show
 Playbook
-    projectId ProjectId
+    projectId ProjectId OnDeleteCascade
     file String
     playbookName String
 Run
-    playbookId PlaybookId
+    playbookId PlaybookId OnDeleteCascade
     status Int
     oid String
     triggerdate String
@@ -51,7 +51,7 @@ Event
     play String
     play_id Int
     host String
-    runId RunId
+    runId RunId OnDeleteCascade
     is_changed Bool
     is_skipped Bool
     is_failed Bool
@@ -60,7 +60,7 @@ Event
     item String
     output String
 JobQueue
-    playbookId PlaybookId
+    playbookId PlaybookId OnDeleteCascade
     arguments String
     triggerDate String
 |]
