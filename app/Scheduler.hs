@@ -53,16 +53,16 @@ schedule :: ConnectionPool -> IO ()
 schedule pool = do
     runJobs pool M.empty
 
--- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
+-- | Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO ()
 runJobs pool jobTempls = do
     liftIO $ print jobTempls -- TODO: Replace with logging
-    jobTempls' <- runSqlPool (updateConfigRepoJobTemplates jobTempls >>= \u -> M.union u <$> readJobQueueDatabase) pool --Have different timing for the two updates
+    jobTempls' <- runSqlPool (updateConfigRepoJobTemplates jobTempls >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
     js <- snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
     threadDelay 10000000
     runJobs pool js
 
--- |Calculates the next job instances from the templates
+-- | Calculates the next job instances from the templates
 calculateNextInstances :: StateT JobTemplates IO Jobs
 calculateNextInstances = do
     templates <- get
@@ -77,7 +77,7 @@ getDueJobs jobs = do
     time <- liftIO getTime <&> (& localTimeOfDayL %~ (`addTimeOfDay` TimeOfDay{todHour=0,todMin=1,todSec=0})) -- Rounds to the next second
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
--- |Executes the jobs and removes the user jobs from the job templates
+-- | Executes the jobs and removes the user jobs from the job templates
 executeJobs :: ConnectionPool -> Jobs -> StateT JobTemplates IO ()
 executeJobs pool jobs = do
     mapM_ (executeJob pool) jobs
@@ -87,7 +87,7 @@ executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob pool job = do
     templates <- get
     case templates ^? ix (job^.templateName) of
-      Nothing       -> error "Internal error, a job was created from a nonexistent job template."
+      Nothing       -> liftIO $ print "Internal error, a job was created from a nonexistent job template."
       Just template -> do
           time <- liftIO getTime
           runKey <- liftIO $ addRun (Run (template^.playbookId)
@@ -121,7 +121,7 @@ updateConfigRepoJobTemplates templs = do
     liftIO $ cleanupFoldersAndTemplates templs projects
     mapM (updateSystemTemplate templs) projects <&> M.unions
 
--- |When a project is deleted in the database remove the folder and it's job templates
+-- | When a project is deleted in the database remove the folder and it's job templates
 cleanupFoldersAndTemplates :: JobTemplates -> [Entity Project] -> IO JobTemplates
 cleanupFoldersAndTemplates templs projects = do
     existingFolders <- listDirectory schedulerRepoRoot >>= filterM doesDirectoryExist
@@ -130,7 +130,7 @@ cleanupFoldersAndTemplates templs projects = do
     mapM_ removeDirectoryRecursive remove
     return $ foldl' (flip M.delete) templs remove
 
--- |Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
+-- | Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
 updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 updateSystemTemplate templs project = do
     let oid = projectOid $ entityVal project
@@ -151,13 +151,16 @@ getTemplatesFromProject :: JobTemplates -> Entity Project -> JobTemplates
 getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) templs
     where path = projectToPath project
 
+-- | Tries to parse the config file in the folder pointed to by path.
+-- Writes the parse status and the playbooks specified in the config file in the database and creates the job-tomplates
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 readAndParseConfigFile oid path p = do
-    pcs <- liftIO $ parseConfigFile path
+    pcs <- parseConfigFile (entityKey p) path
     if null pcs then update (entityKey p) [ProjectErrorMessage =. "Error in the config file"] >> return M.empty else do
         keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
         return $ M.unions $ zipWith (createTemplateFromPlaybookConfiguration oid path) keys pcs
 
+-- | Given an oid, path, a playbook kay and the parsed config, created an job-template
 createTemplateFromPlaybookConfiguration :: String -> String -> Key Playbook -> PlaybookConfiguration -> JobTemplates
 createTemplateFromPlaybookConfiguration oid path key p = M.singleton (pName p)
     JobTemplate{_scheduleFormat=pSchedule p, _repoPath=path, _playbook=pFile p, _playbookId=key, _failCount=0, _systemJob=True, _repoIdentifier=oid}
@@ -165,19 +168,19 @@ createTemplateFromPlaybookConfiguration oid path key p = M.singleton (pName p)
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]
 
--- |Creates or updates the repo folder if necessary
+-- | Creates or updates the repo folder if necessary
 getRepo :: String -> String -> String -> String -> IO (Either String (Bool,String))
 getRepo oid path url branch =
     ifM (liftIO (doesDirectoryExist path)) (updateFolder oid path url branch) (fillFolder path url branch)
 
--- |Updates the repo folder if necessary
+-- | Updates the repo folder if necessary
 updateFolder :: String -> String -> String -> String -> IO (Either String (Bool,String))
 updateFolder oid path url branch =
     ifM (liftIO (isRepo path url))
         (doPullPerhaps oid path branch)
         (fillFolder path url branch)
 
--- |Pulls if there is an update
+-- | Pulls if there is an update
 doPullPerhaps :: String -> String -> String -> IO (Either String (Bool,String))
 doPullPerhaps oid path branch = do
     pull <- doPull path branch
@@ -188,11 +191,11 @@ doPullPerhaps oid path branch = do
           return $ Right $ if oidNew == oid then (False, oid)
                                             else (True, oidNew)
 
--- |Clones the repo
+-- | Recrates the folder, by removing it (if it existed) and cloning the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
 fillFolder path url branch = liftIO (removePathForcibly path) >> doClone url path branch >>= getOidAfterAction
 
--- |Gets the oid after a pull or clone while respecting failures
+-- | Returns the oid after a pull or clone while respecting failures
 getOidAfterAction :: Either String () -> IO (Either String (Bool,String))
 getOidAfterAction retAction = getLastOid >>= \oid -> return $ (True,oid) <$ retAction
 
@@ -213,13 +216,16 @@ createUserTemplate play proj =
     JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=projectOid (entityVal proj)}
 
--- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
+-- | Assumes ssh format (e.g. @git@git.example.com:test/test-repo.git@) and return the path (e.g. @test/test-repo@)
+-- or an empty string on failure
 projectToPath :: Entity Project -> FilePath
 projectToPath p = let path = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
                   in if validRepoName path then path else ""
     where
         removeGitSuffix = reverse . after '.' . reverse
 
+-- | Tests if a string is a valid repo name. A repository name should contain only alphanumeric,
+-- dash (@'-'@), underscore (@'_'@) and dot (@'.'@) characters, but should not be euqal to @..@.
 validRepoName :: String -> Bool
 validRepoName ".." = False
 validRepoName s    = all chech s
@@ -228,6 +234,7 @@ validRepoName s    = all chech s
 getDatabaseJobQueue :: ReaderT SqlBackend IO [Entity JobQueue]
 getDatabaseJobQueue = selectList [] [Asc JobQueueId]
 
+-- | Joins the job-queue, playbooks and projects
 joinJobQueuePlaybookProject :: ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
 joinJobQueuePlaybookProject = do
     jobs <- selectList [] [Asc JobQueueId]
@@ -235,7 +242,7 @@ joinJobQueuePlaybookProject = do
     projects  <- mapM (getPlaybookProject . playbookProjectId . entityVal) playbooks
     return $ zip3 jobs playbooks projects
 
--- |Removes all Jobs whose Project is marked as failed
+-- | Removes all jobs whose project are marked as failed
 removeIllegalJobs :: [(Entity JobQueue, Entity Playbook, Entity Project)] -> ReaderT SqlBackend IO [(Entity JobQueue, Entity Playbook, Entity Project)]
 removeIllegalJobs list = return $ filter (\(_,_,x) -> null $ projectErrorMessage (entityVal x)) list
 
@@ -253,7 +260,7 @@ getTime = do
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM b t e = b >>= \b -> if b then t else e
 
--- |A total version of tail . dropWhile (/= x)
+-- | A total version of @tail . dropWhile (/= x)@
 after :: Eq a => a -> [a] -> [a]
 after x xs = case dropWhile (/= x) xs of
           []  -> []

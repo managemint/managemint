@@ -50,6 +50,8 @@ scheduleNext :: Schedule
 scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_startTime=allFullHours, _repetitionTime=[TimeOfDay{todHour=0,todMin=1,todSec=0}]}}
 
 
+-- /PARSER/ --
+
 -- '_' means space here
 -- <Top>      ::= <Weekdays> | <Weeksdays> _ <Times> | <Times>
 -- <Weekdays> ::= <List(Enum(Day))>
@@ -60,7 +62,7 @@ scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_
 -- <Time>     ::= <Hour> : <Min> | <Min'>
 -- <HourSym>  ::= 00 | 01 .. 24
 -- <Min>      ::= 00 | 01 .. 60
--- <Min'>     ::= 0 | 1 .. 60
+-- <Min'>     ::= 1  | 2 .. 60
 
 parseList :: Eq a => Parser a -> Parser [a]
 parseList p = parseList' p $ parseList p
@@ -93,53 +95,69 @@ parseDay = Monday    <$ keyword "mon"
        <|> Saturday  <$ keyword "sat"
        <|> Sunday    <$ keyword "sun"
 
+-- | Parses @[[start-time(s)][/repetition-time(s)]]@
 parseTimes :: Parser ScheduleTime
 parseTimes = ScheduleTime <$> parseStart <*> (char '/' *> parseRepetition)
          <|> flip ScheduleTime [TimeOfDay 0 1 0] <$> parseStart
          <|> ScheduleTime allFullHours <$> (char '/' *> parseRepetition)
 
+-- | Parses @[start-time(s)]@
 parseStart :: Parser [TimeOfDay]
 parseStart = nub <$> ((++) <$> parseStartMinutes <*> (char ',' *> parseStart))
          <|> nub <$> parseStartMinutes
 
+-- | Parses the minutes of the start-time
+-- Allows that the hours and @:@ are missing
 parseStartMinutes :: Parser [TimeOfDay]
 parseStartMinutes = (\m -> map (`addTimeOfDay` TimeOfDay 0 m 0) allFullHours) <$> parseMin'
                 <|> (:[]) <$> parseTimeOfDay
 
+-- | Parses @[repetition-time(s)]@
 parseRepetition :: Parser [TimeOfDay]
 parseRepetition = nub <$> parseList' parseRepetitionMinutes parseRepetition
               <|> (:[]) <$> parseRepetitionMinutes
 
+-- | Parses the minutes of the repetition-time
+-- Allows that the hours and @:@ are missing
 parseRepetitionMinutes :: Parser TimeOfDay
 parseRepetitionMinutes = (\m -> TimeOfDay 0 m 0) <$> parseMin'
                      <|> parseTimeOfDay
 
+-- | Parses a time-of-day without the seconds (@hh:mm@)
 parseTimeOfDay :: Parser TimeOfDay
 parseTimeOfDay = TimeOfDay <$> parseHour <*> (char ':' *> parseMin) <*> pure 0
 
 parseHour :: Parser Int
 parseHour = parseBetween 0 24
 
+-- | Parses a minute, where the length of the digits is two (filled with leading zeros)
 parseMin :: Parser Int
 parseMin = parseBetween 0 60
 
+-- | Parses a minute, where the digits don't have a leading zeros
 parseMin' :: Parser Int
 parseMin' = helper 1 <|> helper 2
     where helper n = Parser $ \s -> let (m,r) = splitAt n s
                                     in case readMaybe m of
-                                         Just int -> [(int,r) | 0 <= int && int < 60]
+                                         Just int -> [(int,r) | 1 <= int && int < 60]
                                          _        -> []
 
--- |Parses a Int greater equal than the lower und smaller than the upper bound
---parse (parseBetween 0 60) "5"  == Nothing
---parse (parseBetween 0 60) "05" == Just 5
+-- | Parses a int greater equal than the lower und smaller than the upper bound
+-- Furthermore, expects the length of the input to be as big as the length of the upper bound
+-- @parse (parseBetween 0 60) "5"  == Nothing@
+-- @parse (parseBetween 0 60) "05" == Just 5@
 parseBetween :: Int -> Int -> Parser Int
 parseBetween l u = Parser $ \s -> let (m,r) = splitAtExactly (length (show u)) s
                                   in case readMaybe m of
                                        Just int -> [(int,r) | l <= int && int < u]
                                        _        -> []
 
--- |Given a time and a Schedule expression, calculates the soonest time that matches the expression
+-- \PARSER\ --
+
+
+-- /INTERPRETOR/ --
+
+-- | Given a time and a schedule expression, calculates the soonest time that matches the expression
 nextInstance :: LocalTime -> Schedule -> LocalTime
 nextInstance time schedule = minimum $ filter (>= time) allPossibleTimes
     where
@@ -148,19 +166,19 @@ nextInstance time schedule = minimum $ filter (>= time) allPossibleTimes
                                            Nothing -> pure midnight
                                            Just s  -> scheduleTimeToList s
 
--- |Transforms a list of generic weekdays (e.g. [Monday]) to a list specific ones (e.g. [Monday 13.03.2022]).
---These are the first occurences of the weekdays on and after a certain day.
---If the weekday of the given day is part of the list, it will be added twice, one time the day itself and the other time seven days plus the day
+-- | Transforms a list of generic weekdays (e.g. @[Monday]@) to a list specific ones (e.g. @[Monday 13.03.2022]@).
+-- These are the first occurences of the weekdays on and after a certain day.
+-- If the weekday of the given day is part of the list, it will be added twice, one time the day itself and the other time seven days plus the day
 instanceOfDaysOfWeek :: Day -> [DayOfWeek] -> [Day]
 instanceOfDaysOfWeek d ds = prependBool (dayOfWeek d `elem` ds) (firstDayOfWeekAfter (dayOfWeek d) d)
     $ map (`firstDayOfWeekOnAfter` d) ds
 
--- |Calculates all possible TimeOfDays that match the ScheduleTime expression
+-- |Calculates all possible time-of-days that match the schedule-time expression
 scheduleTimeToList :: ScheduleTime -> [TimeOfDay]
 scheduleTimeToList st = concat [ iterateN (maxMultiple start rep) (addTimeOfDay rep) start
                                | start <- st^.startTime, rep <- st^.repetitionTime ]
 
--- |For parameters t r, calculates how many times can one add r to t until the next hour/day (r consits only of minutes/r has non zero hour) is reached.
+-- | For parameters @t r@, calculates how many times one can add @r@ to @t@ until the next hour/day (@r@ consits only of minutes/@r@ has non zero hour) is reached.
 maxMultiple :: TimeOfDay -> TimeOfDay -> Int
 maxMultiple = maxMultipleH 1
     where maxMultipleH n time mult =
@@ -169,13 +187,19 @@ maxMultiple = maxMultipleH 1
               x -> let hours = time^.todHourL + mult^.todHourL + ((time^.todMinL + mult^.todMinL) `div` 60) in
                    if hours < 24 then maxMultipleH (n+1) (addTimeOfDay time mult) mult else n
 
--- |Addes two TimeOfDays ignoring the seconds
+-- | Addes two time-of-days ignoring the seconds
 addTimeOfDay :: TimeOfDay -> TimeOfDay -> TimeOfDay
 addTimeOfDay TimeOfDay{todHour=t1h, todMin=t1m} TimeOfDay{todHour=t2h, todMin=t2m} =
     TimeOfDay{todHour=(t1h+t2h + ((t1m+t2m) `div` 60)) `mod` 24, todMin=(t1m+t2m) `mod` 60, todSec=0}
 
+-- | The first day-of-week after some day
 firstDayOfWeekAfter :: DayOfWeek -> Day -> Day
 firstDayOfWeekAfter weekday day = firstDayOfWeekOnAfter weekday (addDays 1 day)
+
+-- \INTERPRETOR\ --
+
+
+-- /MISC/ --
 
 prependBool :: Bool -> a -> [a] -> [a]
 prependBool b x xs = if b then x:xs else xs
@@ -183,7 +207,9 @@ prependBool b x xs = if b then x:xs else xs
 iterateN :: Int -> (a -> a) -> a -> [a]
 iterateN n f x = take n $ iterate f x
 
--- |splitAtExactly 2 "12:00" == ("12","00"), but splitAtExactly 2 "1" == ("","1")
+-- | @splitAtExactly 2 "12:00" == ("12","00")@, but @splitAtExactly 2 "1" == ("","1")@
 splitAtExactly :: Int -> [a] -> ([a],[a])
 splitAtExactly n list = if length l < n then ([], list) else (l,r)
     where (l,r) = splitAt n list
+
+-- \MISC\ --

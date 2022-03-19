@@ -30,12 +30,14 @@ data PlaybookConfiguration = PlaybookConfiguration
     }
     deriving (Show)
 
-parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
-parseConfigFile path = do
-    contents <- readFile $ path ++ "/hansible.conf"
-    return $ case compileTomlish contents of
-               Nothing    -> []
-               Just trees -> mapMaybe (parseTomlishTree . (:[])) trees
+-- | Tries to parse the config file in the folder pointed to by path
+-- If the parsing fails updates the database
+parseConfigFile :: Key Project -> FilePath -> ReaderT SqlBackend  IO [PlaybookConfiguration]
+parseConfigFile p path = do
+    contents <- liftIO $ readFile $ path ++ "/hansible.conf"
+    case compileTomlish contents of
+      Nothing    -> update p [ProjectErrorMessage =. "Failed to parse the config file"] >> return []
+      Just trees -> return $ mapMaybe (parseTomlishTree . (:[])) trees
 
 parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
 parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
