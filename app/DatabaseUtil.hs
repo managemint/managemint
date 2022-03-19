@@ -57,6 +57,7 @@ Event
     is_skipped Bool
     is_failed Bool
     is_unreachable Bool
+    ignore_errors Bool
     is_item Bool
     item String
     output String
