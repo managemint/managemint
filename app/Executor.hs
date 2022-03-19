@@ -106,8 +106,8 @@ sockPath = executorSockPath
 writeResult :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
 writeResult arr pool rid = void $ addEvent (Event (taskARR arr) (taskIdARR arr)
             (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
-            (is_skipped arr) (is_failed arr) (is_unreachable arr) (is_item arr)
-            (item arr) "Output not implemented") pool
+            (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
+            (is_item arr) (item arr) "Output not implemented" ) pool
 
 writeStart :: AnsibleRunnerStart -> ConnectionPool -> RunId -> IO ()
 writeStart ars pool rid = return ()
