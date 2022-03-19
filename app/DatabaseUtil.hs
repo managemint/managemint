@@ -44,6 +44,7 @@ Run
     playbookId PlaybookId OnDeleteCascade
     status Int
     oid String
+    system Bool
     triggerdate String
 Event
     task String

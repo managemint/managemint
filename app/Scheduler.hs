@@ -56,8 +56,8 @@ schedule pool = do
 -- |Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> JobTemplates -> IO ()
 runJobs pool jobTempls = do
-    liftIO $ print jobTempls -- TODO: Remove
-    jobTempls' <- runSqlPool (readJobQueueDatabase >>= \u -> M.union u <$> updateConfigRepoJobTemplates jobTempls) pool --Have different timing for the two updates
+    liftIO $ print jobTempls -- TODO: Replace with logging
+    jobTempls' <- runSqlPool (updateConfigRepoJobTemplates jobTempls >>= \u -> M.union u <$> readJobQueueDatabase) pool --Have different timing for the two updates
     js <- snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
     threadDelay 10000000
     runJobs pool js
@@ -90,7 +90,11 @@ executeJob pool job = do
       Nothing       -> error "Internal error, a job was created from a nonexistent job template."
       Just template -> when (template^.failCount <= schedulerFailMax) $ do
           time <- liftIO getTime
-          runKey <- liftIO $ addRun (Run (template^.playbookId) 1 (template^.repoIdentifier) (takeWhile (/= '.') (show time))) pool
+          runKey <- liftIO $ addRun (Run (template^.playbookId)
+                                         1
+                                         (template^.repoIdentifier)
+                                         (template^.systemJob)
+                                         (takeWhile (/= '.') (show time))) pool
           success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template^.repoPath, playbookName=template^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
           let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
           put $ templates & ix (job^.templateName) %~ (& failCount %~ if success then const 0 else ( +1))
@@ -207,7 +211,7 @@ readJobQueueDatabase = do
 createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
     JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
-                _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=""} --TODO: Add support for repoIdentifier
+                _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=projectOid (entityVal proj)}
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
 projectToPath :: Entity Project -> FilePath
