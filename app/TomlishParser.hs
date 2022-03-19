@@ -140,6 +140,8 @@ tomlish =  QuasiQuoter { quoteExp  = lift . compile
                        , quoteDec  = error "tomlish"
                        }
 
+-- This is based on exercise sheet 11 and the example to QuasiQuoters given on the Haskell wiki https://wiki.haskell.org/Quasiquotation
+
 antiTomlishKeyPat :: TomlishKey -> Maybe PatQ
 antiTomlishKeyPat (TomlishAntiKey v) = Just $ conP (mkName "TomlishKey") [varP (mkName v)]
 antiTomlishKeyPat _ = Nothing
