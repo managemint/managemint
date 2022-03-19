@@ -117,11 +117,11 @@ itemWidget (Entity eventid event) = do
 
 hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Status)
 hostWidget (Entity runid run) playId taskId host pool = do
-    events <- runSqlPool (selectList [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] [Asc EventId ]) pool
     isItemized <- runSqlPool (exists [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid, EventIs_item ==. True]) pool
     -- Either single element or sublist in case of items
     if isItemized then
         do
+            events <- runSqlPool (selectList [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid, EventIs_item ==. True] [Asc EventId]) pool
             items <- mapM itemWidget events
             let (hostWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) items
             return (toWidget [whamlet|
@@ -132,8 +132,9 @@ hostWidget (Entity runid run) playId taskId host pool = do
             |], status)
     else
         do
-            let (text, status) = eventToStatus (entityVal (Prelude.head events))
-            return (toWidget [whamlet|#{eventHost (entityVal (Prelude.head events))}: #{text}|], status)
+            event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] [Asc EventId]) pool
+            let (text, status) = eventToStatus (entityVal (fromJust event))
+            return (toWidget [whamlet|#{eventHost (entityVal (fromJust event))}: #{text}|], status)
 
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
