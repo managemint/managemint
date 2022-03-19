@@ -16,5 +16,6 @@ sockReadLen = 2048
 schedulerFailMax = 3 :: Int
 schedulerUserTemplateKey = "USERTEMPLATE" -- Parser is not allowed to parse a job name starting with this string
 schedulerFolders = ["app",".stack-work","venv","csrc",".git"] -- TODO: Remove this as soon as the repos live in their own folder
+schedulerRepoRoot = "." :: FilePath
 
 executorSockPath = "/tmp/hansible.sock"
