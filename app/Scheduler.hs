@@ -88,7 +88,7 @@ executeJob pool job = do
     templates <- get
     case templates ^? ix (job^.templateName) of
       Nothing       -> error "Internal error, a job was created from a nonexistent job template."
-      Just template -> when (template^.failCount <= schedulerFailMax) $ do
+      Just template -> do
           time <- liftIO getTime
           runKey <- liftIO $ addRun (Run (template^.playbookId)
                                          1
