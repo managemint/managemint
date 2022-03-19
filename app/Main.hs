@@ -77,14 +77,15 @@ instance YesodPersist Hansible where
         Hansible pool _ <- getYesod
         runSqlPool action pool
 
-data Status = Ok | Failed | Running
+data Status = Ok | Failed | FailedIgnored | Running
 
 generateStatusIndicator :: Status -> Widget
 generateStatusIndicator success =
     let s = case success of
             Ok -> "green"
             Failed -> "red"
-            Running -> "blue" ::String in
+            Running -> "blue" ::String
+            FailedIgnored -> "#FA5858" in
     toWidget
         [whamlet|
             <font color=#{s}>
@@ -100,6 +101,8 @@ statusIntToStatus x = case x of
 
 joinStatus :: Status -> Status -> Status
 joinStatus Ok Ok = Ok
+joinStatus FailedIgnored x = x
+joinStatus x FailedIgnored = x
 joinStatus _ _ = Failed
 
 eventToStatus :: Event -> (String, Status)
@@ -108,6 +111,7 @@ eventToStatus event
   | eventIs_failed event = ("FAILED", Failed)
   | eventIs_skipped event = ("SKIPPED", Ok)
   | eventIs_unreachable event = ("UNREACHABLE", Failed)
+  | eventIs_failed event && eventIgnore_errors event = ("ERROR(Ignored)", FailedIgnored)
   | otherwise = ("SUCCESS", Ok)
 
 itemWidget :: Entity Event -> IO (Widget, Status)
