@@ -87,3 +87,9 @@ addEvent event = runSqlPool (insert event)
 
 data Hansible = Hansible{ connections :: ConnectionPool, getStatic :: Static }
 
+connectionInfo :: ConnectInfo
+connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
+                                    , connectUser     = "hansible"
+                                    , connectPassword = "AffqDbF2Vw5Aq7EHferw"
+                                    , connectDatabase = "hansible"
+                                    }
