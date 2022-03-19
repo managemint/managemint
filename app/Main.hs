@@ -105,19 +105,26 @@ joinStatus FailedIgnored x = x
 joinStatus x FailedIgnored = x
 joinStatus _ _ = Failed
 
-eventToStatus :: Event -> (String, Status)
+statusWidget :: String -> String -> Widget
+statusWidget text clazz = do
+    toWidget [whamlet|
+                <font class=#{clazz}>
+                    #{text}
+            |]
+
+eventToStatus :: Event -> (Widget, Status)
 eventToStatus event
-  | eventIs_changed event = ("CHANGED", Ok)
-  | eventIs_failed event && eventIgnore_errors event = ("FAILED(IGNORED)", FailedIgnored)
-  | eventIs_failed event = ("FAILED", Failed)
-  | eventIs_skipped event = ("SKIPPED", Ok)
-  | eventIs_unreachable event = ("UNREACHABLE", Failed)
-  | otherwise = ("SUCCESS", Ok)
+  | eventIs_changed event = (statusWidget "CHANGED" "status-changed", Ok)
+  | eventIs_failed event && eventIgnore_errors event = (statusWidget "FAILED(IGNORED)" "status-failed-ignored", FailedIgnored)
+  | eventIs_failed event = (statusWidget "FAILED" "status-failed", Failed)
+  | eventIs_skipped event = (statusWidget "SKIPPED" "status-skipped", Ok)
+  | eventIs_unreachable event = (statusWidget "UNREACHABLE" "status-unreachable", Failed)
+  | otherwise = (statusWidget "OK" "status-ok", Ok)
 
 itemWidget :: Entity Event -> IO (Widget, Status)
 itemWidget (Entity eventid event) = do
     let (text, status) = eventToStatus event
-    return (toWidget [whamlet|#{eventItem event}: #{text}|], status)
+    return (toWidget [whamlet|#{eventItem event}: ^{text}|], status)
 
 hostWidget :: Entity Run -> Int -> Int -> String -> ConnectionPool -> IO (Widget, Status)
 hostWidget (Entity runid run) playId taskId host pool = do
@@ -138,7 +145,7 @@ hostWidget (Entity runid run) playId taskId host pool = do
         do
             event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventHost ==. host, EventRunId ==. runid] [Asc EventId]) pool
             let (text, status) = eventToStatus (entityVal (fromJust event))
-            return (toWidget [whamlet|#{eventHost (entityVal (fromJust event))}: #{text}|], status)
+            return (toWidget [whamlet|#{eventHost (entityVal (fromJust event))}: ^{text}|], status)
 
 getHosts :: MonadIO m => Key Run -> Int -> Int -> ReaderT SqlBackend m [Single String]
 getHosts run playId taskId = rawSql "SELECT DISTINCT event.host FROM event WHERE event.run_id=? AND event.play_id=? AND event.task_id=?" [toPersistValue run, toPersistValue playId,toPersistValue taskId]
