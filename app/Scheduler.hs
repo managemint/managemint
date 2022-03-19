@@ -83,6 +83,8 @@ executeJobs pool jobs = do
     mapM_ (executeJob pool) jobs
     modify $ M.filter (^. systemJob)
 
+-- | Executes a job and writes the run into the database
+-- If the job failes, increases the failcount, else resets it
 executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
 executeJob pool job = do
     templates <- get
@@ -102,19 +104,19 @@ executeJob pool job = do
 
 -- /SYSTEM JOBS/ --
 
--- Projecte aus der Datenbank lesen
--- Nicht existente Ordner und Job Templates löschen
--- Für jedes Projekt:
---   Schauen ob der Ordner schon existiert:
---     Nein -> Clone ausführen(f/s)
---     Ja -> Schauen ob das eine Repo ist
---       Nein -> Ordner löschen
---               Clone ausführen (f/s)
---       Ja   -> Schaun ob sich die oid geändert hat
---          Ja -> Pull ausführen und templates entfernen (f/s)
---          Nein -> nichts tun
---  Nun Config Datei parsen (falls ordner erneuert)
---  Daraus Templates erstellen
+-- Read project from the datatbase
+-- Cleanup of folders and templates if a project is removed from the database
+-- For ever project:
+--   Check if it locally exists:
+--      No  -> Clone
+--      Yes -> Check if it is a valid repo
+--         No  -> Delete Folder
+--               Clone
+--         Yes -> Check if something changed:
+--             Yes -> Pull
+--             No  -> do nothing
+-- If something happend above, parse config file
+-- Create templates
 updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
 updateConfigRepoJobTemplates templs = do
     projects <- getProjects

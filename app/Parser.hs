@@ -15,6 +15,8 @@ import Data.Char
 import Data.Maybe
 import Data.Bifunctor
 
+-- This parser is based on exercise sheet 11
+
 newtype Parser a = Parser (String -> [(a, String)])
 
 instance Functor Parser where
