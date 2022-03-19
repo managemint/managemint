@@ -41,6 +41,7 @@ dependencies:
 - Cabal
 - transformers
 - template-haskell
+- syb
 
 executables:
   hansible-exe:

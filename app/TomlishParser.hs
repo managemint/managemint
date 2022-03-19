@@ -1,4 +1,4 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell #-}
+{-# LANGUAGE QuasiQuotes, TemplateHaskell, DeriveDataTypeable #-}
 {- app/TomlishParser.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -17,6 +17,7 @@ import Control.Applicative
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
 import Language.Haskell.TH.Syntax
+import Data.Generics
 
 -- TODO: comments, support more types as values
 -- <Top>     ::= <Segment> \n <Top> | <Segment> | e
@@ -29,17 +30,17 @@ import Language.Haskell.TH.Syntax
 
 data TomlishKey = TomlishKey String
                 | TomlishAntiKey String
-                deriving (Show)
+                deriving (Show, Data)
 
 data TomlishType= TomlishString String
                 | TomlishAntiString String
                 | TomlishInt Int
                 | TomlishAntiInt String
-                deriving (Show)
+                deriving (Show, Data)
 
 data Tree a b   = Node a [Tree a b]
                 | Leave a b
-                deriving (Show)
+                deriving (Show, Data)
 
 type TomlishTree = Tree TomlishKey TomlishType
 
@@ -75,24 +76,27 @@ parseKeyValue =  Leave <$> (parseTomlishKey <* skipSpaces <* char '=') <*> (skip
 
 parseNode :: Parser [TomlishTree]
 parseNode =  (:[]) <$> parseKeyValue
-         <|> (:) <$> (parseKeyValue <* skipNewline <* char '\n') <*> parseNode
+         <|> (:) <$> (parseKeyValue <* skipNewline <* lineSeperator) <*> parseNode
 
 parseSegmentTop :: Parser TomlishTree
 parseSegmentTop =  char '[' *> skipSpaces *> parsePath <* skipSpaces <* char ']'
 
 parseSegment :: Parser TomlishTree
 parseSegment =  parseSegmentTop
-            <|> addLeavesLinear <$> (parseSegmentTop <* skipNewline <* char '\n') <*> parseNode
+            <|> addLeavesLinear <$> (parseSegmentTop <* skipNewline <* lineSeperator) <*> parseNode
 
 parseTop :: Parser [TomlishTree]
 parseTop =  (:[]) <$> parseSegment <* skipNewline
-        <|> (:) <$> (parseSegment <* skipNewline <* char '\n') <*> parseTop
+        <|> (:) <$> (parseSegment <* skipNewline <* lineSeperator) <*> parseTop
 
 skipNewline :: Parser ()
 skipNewline = () <$ many (char '\n' <|> space)
 
 line :: Parser String
 line = many $ notChars "\"\n"
+
+lineSeperator :: Parser Char
+lineSeperator = char '\n' <|> char ';'
 
 --
 -- tomlish quasi-quoter
@@ -118,7 +122,21 @@ instance (Lift a, Lift b) => Lift (Tree a b) where
 
 tomlish :: QuasiQuoter
 tomlish =  QuasiQuoter { quoteExp  = lift . compileTomlish
-                       , quotePat  = error "tomlish"
+                       , quotePat  = \s -> do {tree <- foo s; dataToPatQ (const Nothing `extQ` antiTomlishKeyPat `extQ` antiTomlishTypePat) tree}
                        , quoteType = error "tomlish"
                        , quoteDec  = error "tomlish"
                        }
+
+foo :: MonadFail m => String -> m [TomlishTree]
+foo s = case compileTomlish s of
+          Nothing -> fail "Failed to parse"
+          Just v  -> return v
+
+antiTomlishKeyPat :: TomlishKey -> Maybe PatQ
+antiTomlishKeyPat (TomlishAntiKey v) = Just $ conP (mkName "TomlishKey") [varP (mkName v)]
+antiTomlishKeyPat _ = Nothing
+
+antiTomlishTypePat :: TomlishType -> Maybe PatQ
+antiTomlishTypePat (TomlishAntiInt s) = Just $ conP (mkName "TomlishInt") [varP (mkName s)]
+antiTomlishTypePat (TomlishAntiString s) = Just $ conP (mkName "TomlishString") [varP (mkName s)]
+antiTomlishTypePat _ = Nothing
