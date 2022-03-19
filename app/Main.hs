@@ -208,11 +208,11 @@ projectWidget (Entity projectid project) pool = do
             toWidget
                 [whamlet|
                     <li>
+                        Project: #{projectUrl project} (#{projectBranch project})
+                        <form method=post action=@{HomeR}>
+                            ^{widgetDeleteRepo}
+                            <button>Remove
                         <ul class="playbooks">
-                            Project: #{projectUrl project} (#{projectBranch project})
-                            <form method=post action=@{HomeR}>
-                                ^{widgetDeleteRepo}
-                                <button>Remove
                             $if Prelude.null (projectErrorMessage project)
                                 $forall entity <- playbooks
                                     ^{playbookWidget entity pool}
