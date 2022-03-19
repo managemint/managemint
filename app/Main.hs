@@ -181,7 +181,7 @@ playbookWidget (Entity playbookid playbook) pool = do
           runSqlPool (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "") pool
           return ()
         _ -> return ()
-    runs <- runSqlPool (selectList [RunPlaybookId ==. playbookid] [Asc RunId]) pool
+    runs <- runSqlPool (selectList [RunPlaybookId ==. playbookid] [Desc RunId]) pool
     toWidget
         [whamlet|
             <li>
@@ -213,22 +213,19 @@ projectWidget (Entity projectid project) pool = do
                         <form method=post action=@{HomeR}>
                             ^{widgetDeleteRepo}
                             <button>Remove
-                            $if Prelude.null (projectErrorMessage project)
-                                <ul class="playbooks">
-                                    $forall entity <- playbooks
-                                        ^{playbookWidget entity pool}
-                            $else
-                                <br>
-                                <font color="red">
-                                    #{projectErrorMessage project}
+                        $if Prelude.null (projectErrorMessage project)
+                            <ul class="playbooks">
+                                $forall entity <- playbooks
+                                    ^{playbookWidget entity pool}
+                        $else
+                            <br>
+                            <font color="red">
+                                #{projectErrorMessage project}
                 |]
 
 hansibleStyle :: Widget -> Widget
 hansibleStyle inp = do
     addStylesheet $ StaticR style_css
---  toWidget [whamlet|
---      <script src=@{StaticR hansible_js} onLoad="timeRefresh(3000);">
---  |]
     inp
 
 getHomeR :: Handler Html
