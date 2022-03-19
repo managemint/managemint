@@ -10,7 +10,8 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
+--module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
+module ScheduleFormat where
 
 import Data.Time.Compat
 import Data.Time.Calendar.Compat
@@ -58,11 +59,13 @@ scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_
 -- <List(A)>  ::= A | A , <List(A)>
 -- <Enum(A)>  ::= <A> .. <Enum(A)> | <A>
 -- <Day>      ::= mon | tue | wed | thu | fri | sat | sun
--- <Times>    ::= <List(Time)> | / <List(Time)> | <List(Time)> / <List(Time)>
--- <Time>     ::= <Hour> : <Min> | <Min'>
+-- <Times>    ::= <List(Time0)> | / <List(Time1)> | <List(Time0)> / <List(Time1)>
+-- <Time1>    ::= <Hour> : <Min> | <Min1>
+-- <Time0>    ::= <Hour> : <Min> | <Min0>
 -- <HourSym>  ::= 00 | 01 .. 24
 -- <Min>      ::= 00 | 01 .. 60
--- <Min'>     ::= 1  | 2 .. 60
+-- <Min1>     ::= 1  |  2 .. 60
+-- <Min0>     ::= 0  |  2 .. 60
 
 parseList :: Eq a => Parser a -> Parser [a]
 parseList p = parseList' p $ parseList p
@@ -109,7 +112,7 @@ parseStart = nub <$> ((++) <$> parseStartMinutes <*> (char ',' *> parseStart))
 -- | Parses the minutes of the start-time
 -- Allows that the hours and @:@ are missing
 parseStartMinutes :: Parser [TimeOfDay]
-parseStartMinutes = (\m -> map (`addTimeOfDay` TimeOfDay 0 m 0) allFullHours) <$> parseMin'
+parseStartMinutes = (\m -> map (`addTimeOfDay` TimeOfDay 0 m 0) allFullHours) <$> parseMin' 0
                 <|> (:[]) <$> parseTimeOfDay
 
 -- | Parses @[repetition-time(s)]@
@@ -120,7 +123,7 @@ parseRepetition = nub <$> parseList' parseRepetitionMinutes parseRepetition
 -- | Parses the minutes of the repetition-time
 -- Allows that the hours and @:@ are missing
 parseRepetitionMinutes :: Parser TimeOfDay
-parseRepetitionMinutes = (\m -> TimeOfDay 0 m 0) <$> parseMin'
+parseRepetitionMinutes = (\m -> TimeOfDay 0 m 0) <$> parseMin' 1
                      <|> parseTimeOfDay
 
 -- | Parses a time-of-day without the seconds (@hh:mm@)
@@ -134,12 +137,12 @@ parseHour = parseBetween 0 24
 parseMin :: Parser Int
 parseMin = parseBetween 0 60
 
--- | Parses a minute, where the digits don't have a leading zeros
-parseMin' :: Parser Int
-parseMin' = helper 1 <|> helper 2
+-- | Parses a minute, where the digits don't have a leading zeros and are >= than the argument
+parseMin' :: Int -> Parser Int
+parseMin' i = helper 1 <|> helper 2
     where helper n = Parser $ \s -> let (m,r) = splitAt n s
                                     in case readMaybe m of
-                                         Just int -> [(int,r) | 1 <= int && int < 60]
+                                         Just int -> [(int,r) | i <= int && int < 60]
                                          _        -> []
 
 -- | Parses a int greater equal than the lower und smaller than the upper bound
