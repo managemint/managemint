@@ -22,6 +22,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns      #-}
 
 import Scheduler
 import Data.Text
@@ -59,8 +60,9 @@ staticFilePath= "static"
 staticFiles "static"
 
 mkYesod "Hansible" [parseRoutes|
-/ HomeR GET POST
-/static StaticR Static getStatic
+/           HomeR GET POST
+/run/#Int   RunR GET
+/static     StaticR Static getStatic
 |]
 
 instance Yesod Hansible
@@ -185,8 +187,9 @@ playbookWidget (Entity playbookid playbook) pool = do
                     ^{widgetRunPlaybook}
                     <button>Run
                 <ul class="runs">
-                    $forall entity <- runs
-                        ^{runWidget entity pool}
+                    $forall (Entity entityid entity) <- runs
+                        <a href=@{RunR (fromIntegral (fromSqlKey entityid))}>
+                            #{runTriggerdate entity}
         |]
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
@@ -241,11 +244,26 @@ getHomeR = do
 postHomeR :: Handler Html
 postHomeR = getHomeR
 
+getRunR :: Int -> Handler Html
+getRunR runInt= do
+    let runId = toSqlKey $ fromIntegral runInt
+    run <- runDB $ selectFirst [RunId  ==. runId] []
+    Hansible pool _ <- getYesod
+    defaultLayout $ hansibleStyle $
+        case run of
+            Just x ->
+                [whamlet|
+                    ^{runWidget x pool}
+                |]
+            _ ->
+                [whamlet|
+                    Can't find run
+                |]
+
 runWebserver :: ConnectionPool -> IO ()
 runWebserver conn = do
     x <- static staticFilePath
     warp 3000 Hansible { connections = conn, getStatic = x }
-
 
 connectionInfo :: ConnectInfo
 connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
@@ -257,7 +275,6 @@ connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
-        flip runSqlPersistMPool pool $ do
-            runMigration migrateAll
+        flip runSqlPersistMPool pool $ runMigration migrateAll
         _ <- async $ schedule pool
         runWebserver pool
