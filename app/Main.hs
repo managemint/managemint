@@ -90,6 +90,14 @@ generateStatusIndicator success =
             <font color=#{s}>
                 ●
         |]
+
+statusIntToStatus :: Int -> Status
+statusIntToStatus x = case x of
+                        1 -> Running
+                        0 -> Ok
+                        -1 -> Failed
+                        _ -> Failed
+
 joinStatus :: Status -> Status -> Status
 joinStatus Ok Ok = Ok
 joinStatus _ _ = Failed
@@ -120,7 +128,7 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventRunId ==. runid] []) pool
     hostNames <- runSqlPool (getHosts runid playId taskId) pool
     hosts <- mapM (\x -> hostWidget entity playId taskId (unSingle x) pool) hostNames
-    let (hostWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) hosts
+    let (hostWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) hosts
     return (toWidget
         [whamlet|
             <li>
@@ -138,7 +146,7 @@ playWidget entity@(Entity runid run) playId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventRunId ==. runid] []) pool
     taskids <- runSqlPool (getTaskIds runid playId) pool
     tasks <- mapM (\x -> taskWidget entity playId (unSingle x) pool) taskids
-    let (taskWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) tasks
+    let (taskWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) tasks
     return (toWidget
         [whamlet|
             <li>
@@ -155,16 +163,11 @@ runWidget :: Entity Run -> ConnectionPool -> Widget
 runWidget entity@(Entity runid run) pool = do
     playids <- runSqlPool (getPlayIds runid) pool
     plays <- liftIO $ mapM (\x -> playWidget entity (unSingle x) pool) playids
-    let (playWidgets, _treeStatus) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) plays
-    let status = case runStatus run of
-                    -1 -> Failed
-                    0 -> Ok
-                    1 -> Running
-                    _ -> Failed
+    let (playWidgets, _treeStatus) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) plays
     toWidget
         [whamlet|
             <li>
-                #{runTriggerdate run} ^{generateStatusIndicator status}
+                #{runTriggerdate run} ^{generateStatusIndicator (statusIntToStatus (runStatus run))}
                 <ul class="plays">
                     $forall play <- playWidgets
                         ^{play}
@@ -188,8 +191,9 @@ playbookWidget (Entity playbookid playbook) pool = do
                     <button>Run
                 <ul class="runs">
                     $forall (Entity entityid entity) <- runs
-                        <a href=@{RunR (fromIntegral (fromSqlKey entityid))}>
-                            #{runTriggerdate entity}
+                        <li>
+                            <a href=@{RunR (fromIntegral (fromSqlKey entityid))}>
+                                #{runTriggerdate entity} ^{generateStatusIndicator (statusIntToStatus (runStatus entity))}
         |]
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
@@ -247,13 +251,13 @@ postHomeR = getHomeR
 getRunR :: Int -> Handler Html
 getRunR runInt= do
     let runId = toSqlKey $ fromIntegral runInt
-    run <- runDB $ selectFirst [RunId  ==. runId] []
+    row <- runDB $ selectFirst [RunId  ==. runId] []
     Hansible pool _ <- getYesod
     defaultLayout $ hansibleStyle $
-        case run of
-            Just x ->
+        case row of
+            Just entity ->
                 [whamlet|
-                    ^{runWidget x pool}
+                    ^{runWidget entity pool}
                 |]
             _ ->
                 [whamlet|
