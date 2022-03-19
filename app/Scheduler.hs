@@ -18,6 +18,7 @@ import Git
 import Executor
 import ScheduleFormat
 import Config
+import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat
 import Data.Time.Clock.Compat
 import Data.List (sort, (\\), foldl')
@@ -119,8 +120,9 @@ updateConfigRepoJobTemplates templs = do
 -- |When a project is deleted in the database remove the folder and it's job templates
 cleanupFoldersAndTemplates :: JobTemplates -> [Entity Project] -> IO JobTemplates
 cleanupFoldersAndTemplates templs projects = do
-    existingFolders <- listDirectory "." >>= filterM doesDirectoryExist -- TODO: Will this path stay?
+    existingFolders <- listDirectory schedulerRepoRoot >>= filterM doesDirectoryExist
     let remove = existingFolders \\ (map projectToPath projects ++ schedulerFolders)
+    liftIO $ print $ "Scheduler removed these folders: " ++ show remove -- TODO: Replace with logging
     mapM_ removeDirectoryRecursive remove
     return $ foldl' (flip M.delete) templs remove
 
@@ -209,9 +211,15 @@ createUserTemplate play proj =
 
 -- |Assumes ssh format (e.g. git@git.example.com:test/test-repo.git) and return the path (e.g. test/test-repo)
 projectToPath :: Entity Project -> FilePath
-projectToPath p = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
+projectToPath p = let path = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
+                  in if validRepoName path then path else ""
     where
         removeGitSuffix = reverse . after '.' . reverse
+
+validRepoName :: String -> Bool
+validRepoName ".." = False
+validRepoName s    = all chech s
+    where chech c = isAlphaNum c || (c `elem` ['-','_','.'])
 
 getDatabaseJobQueue :: ReaderT SqlBackend IO [Entity JobQueue]
 getDatabaseJobQueue = selectList [] [Asc JobQueueId]
