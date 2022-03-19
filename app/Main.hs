@@ -226,6 +226,9 @@ projectWidget (Entity projectid project) pool = do
 hansibleStyle :: Widget -> Widget
 hansibleStyle inp = do
     addStylesheet $ StaticR style_css
+    toWidget [whamlet|
+        <script src=@{StaticR hansible_js} onLoad="timeRefresh(3000);">
+    |]
     inp
 
 getHomeR :: Handler Html
