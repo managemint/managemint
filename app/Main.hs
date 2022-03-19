@@ -22,6 +22,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns      #-}
 
 import Scheduler
 import Data.Text
@@ -59,8 +60,9 @@ staticFilePath= "static"
 staticFiles "static"
 
 mkYesod "Hansible" [parseRoutes|
-/ HomeR GET POST
-/static StaticR Static getStatic
+/           HomeR GET POST
+/run/#Int   RunR GET
+/static     StaticR Static getStatic
 |]
 
 instance Yesod Hansible
@@ -88,6 +90,14 @@ generateStatusIndicator success =
             <font color=#{s}>
                 ●
         |]
+
+statusIntToStatus :: Int -> Status
+statusIntToStatus x = case x of
+                        1 -> Running
+                        0 -> Ok
+                        -1 -> Failed
+                        _ -> Failed
+
 joinStatus :: Status -> Status -> Status
 joinStatus Ok Ok = Ok
 joinStatus _ _ = Failed
@@ -118,7 +128,7 @@ taskWidget entity@(Entity runid run) playId taskId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventTask_id ==. taskId, EventRunId ==. runid] []) pool
     hostNames <- runSqlPool (getHosts runid playId taskId) pool
     hosts <- mapM (\x -> hostWidget entity playId taskId (unSingle x) pool) hostNames
-    let (hostWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) hosts
+    let (hostWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) hosts
     return (toWidget
         [whamlet|
             <li>
@@ -136,7 +146,7 @@ playWidget entity@(Entity runid run) playId pool = do
     event <- runSqlPool (selectFirst [EventPlay_id ==. playId, EventRunId ==. runid] []) pool
     taskids <- runSqlPool (getTaskIds runid playId) pool
     tasks <- mapM (\x -> taskWidget entity playId (unSingle x) pool) taskids
-    let (taskWidgets, status) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) tasks
+    let (taskWidgets, status) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) tasks
     return (toWidget
         [whamlet|
             <li>
@@ -153,16 +163,11 @@ runWidget :: Entity Run -> ConnectionPool -> Widget
 runWidget entity@(Entity runid run) pool = do
     playids <- runSqlPool (getPlayIds runid) pool
     plays <- liftIO $ mapM (\x -> playWidget entity (unSingle x) pool) playids
-    let (playWidgets, _treeStatus) = Data.Foldable.foldl (\(ws, ss) (w, s) -> (w:ws, joinStatus s ss)) ([], Ok) plays
-    let status = case runStatus run of
-                    -1 -> Failed
-                    0 -> Ok
-                    1 -> Running
-                    _ -> Failed
+    let (playWidgets, _treeStatus) = Data.Foldable.foldr (\(w, s) (ws, ss) -> (w:ws, joinStatus s ss)) ([], Ok) plays
     toWidget
         [whamlet|
             <li>
-                #{runTriggerdate run} ^{generateStatusIndicator status}
+                #{runTriggerdate run} ^{generateStatusIndicator (statusIntToStatus (runStatus run))}
                 <ul class="plays">
                     $forall play <- playWidgets
                         ^{play}
@@ -185,8 +190,11 @@ playbookWidget (Entity playbookid playbook) pool = do
                     ^{widgetRunPlaybook}
                     <button>Run
                 <ul class="runs">
-                    $forall entity <- runs
-                        ^{runWidget entity pool}
+                    $forall (Entity entityid entity) <- runs
+                        <li>
+                            <a href=@{RunR (fromIntegral (fromSqlKey entityid))}>
+                                #{runTriggerdate entity}
+                            ^{generateStatusIndicator (statusIntToStatus (runStatus entity))}
         |]
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
@@ -201,15 +209,16 @@ projectWidget (Entity projectid project) pool = do
             toWidget
                 [whamlet|
                     <li>
-                        <ul class="playbooks">
-                            Project: #{projectUrl project} (#{projectBranch project})
-                            <form method=post action=@{HomeR}>
-                                ^{widgetDeleteRepo}
-                                <button>Remove
+                        Project: #{projectUrl project} (#{projectBranch project})
+                        <form method=post action=@{HomeR}>
+                            ^{widgetDeleteRepo}
+                            <button>Remove
                             $if Prelude.null (projectErrorMessage project)
-                                $forall entity <- playbooks
-                                    ^{playbookWidget entity pool}
+                                <ul class="playbooks">
+                                    $forall entity <- playbooks
+                                        ^{playbookWidget entity pool}
                             $else
+                                <br>
                                 <font color="red">
                                     #{projectErrorMessage project}
                 |]
@@ -217,6 +226,9 @@ projectWidget (Entity projectid project) pool = do
 hansibleStyle :: Widget -> Widget
 hansibleStyle inp = do
     addStylesheet $ StaticR style_css
+    toWidget [whamlet|
+        <script src=@{StaticR hansible_js} onLoad="timeRefresh(3000);">
+    |]
     inp
 
 getHomeR :: Handler Html
@@ -241,11 +253,26 @@ getHomeR = do
 postHomeR :: Handler Html
 postHomeR = getHomeR
 
+getRunR :: Int -> Handler Html
+getRunR runInt= do
+    let runId = toSqlKey $ fromIntegral runInt
+    row <- runDB $ selectFirst [RunId  ==. runId] []
+    Hansible pool _ <- getYesod
+    defaultLayout $ hansibleStyle $
+        case row of
+            Just entity ->
+                [whamlet|
+                    ^{runWidget entity pool}
+                |]
+            _ ->
+                [whamlet|
+                    Can't find run
+                |]
+
 runWebserver :: ConnectionPool -> IO ()
 runWebserver conn = do
     x <- static staticFilePath
     warp 3000 Hansible { connections = conn, getStatic = x }
-
 
 connectionInfo :: ConnectInfo
 connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
@@ -257,7 +284,6 @@ connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
-        flip runSqlPersistMPool pool $ do
-            runMigration migrateAll
+        flip runSqlPersistMPool pool $ runMigration migrateAll
         _ <- async $ schedule pool
         runWebserver pool
