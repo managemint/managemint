@@ -213,14 +213,14 @@ projectWidget (Entity projectid project) pool = do
                         <form method=post action=@{HomeR}>
                             ^{widgetDeleteRepo}
                             <button>Remove
-                            $if Prelude.null (projectErrorMessage project)
-                                <ul class="playbooks">
-                                    $forall entity <- playbooks
-                                        ^{playbookWidget entity pool}
-                            $else
-                                <br>
-                                <font color="red">
-                                    #{projectErrorMessage project}
+                        $if Prelude.null (projectErrorMessage project)
+                            <ul class="playbooks">
+                                $forall entity <- playbooks
+                                    ^{playbookWidget entity pool}
+                        $else
+                            <br>
+                            <font color="red">
+                                #{projectErrorMessage project}
                 |]
 
 hansibleStyle :: Widget -> Widget
