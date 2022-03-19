@@ -193,7 +193,8 @@ playbookWidget (Entity playbookid playbook) pool = do
                     $forall (Entity entityid entity) <- runs
                         <li>
                             <a href=@{RunR (fromIntegral (fromSqlKey entityid))}>
-                                #{runTriggerdate entity} ^{generateStatusIndicator (statusIntToStatus (runStatus entity))}
+                                #{runTriggerdate entity}
+                            ^{generateStatusIndicator (statusIntToStatus (runStatus entity))}
         |]
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
@@ -212,11 +213,12 @@ projectWidget (Entity projectid project) pool = do
                         <form method=post action=@{HomeR}>
                             ^{widgetDeleteRepo}
                             <button>Remove
-                        <ul class="playbooks">
                             $if Prelude.null (projectErrorMessage project)
-                                $forall entity <- playbooks
-                                    ^{playbookWidget entity pool}
+                                <ul class="playbooks">
+                                    $forall entity <- playbooks
+                                        ^{playbookWidget entity pool}
                             $else
+                                <br>
                                 <font color="red">
                                     #{projectErrorMessage project}
                 |]
