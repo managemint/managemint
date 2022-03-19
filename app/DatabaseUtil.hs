@@ -27,6 +27,7 @@ import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
 import Control.Monad.Trans.Reader
+import Yesod.Static
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
@@ -36,11 +37,11 @@ Project
     oid String
     deriving Show
 Playbook
-    projectId ProjectId
+    projectId ProjectId OnDeleteCascade
     file String
     playbookName String
 Run
-    playbookId PlaybookId
+    playbookId PlaybookId OnDeleteCascade
     status Int
     oid String
     triggerdate String
@@ -50,7 +51,7 @@ Event
     play String
     play_id Int
     host String
-    runId RunId
+    runId RunId OnDeleteCascade
     is_changed Bool
     is_skipped Bool
     is_failed Bool
@@ -59,7 +60,7 @@ Event
     item String
     output String
 JobQueue
-    playbookId PlaybookId
+    playbookId PlaybookId OnDeleteCascade
     arguments String
     triggerDate String
 |]
@@ -82,5 +83,5 @@ addRun run = runSqlPool (insert run)
 addEvent :: Event -> ConnectionPool -> IO (Key Event)
 addEvent event = runSqlPool (insert event)
 
-newtype App = App { connections :: ConnectionPool }
+data Hansible = Hansible{ connections :: ConnectionPool, getStatic :: Static }
 

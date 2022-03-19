@@ -27,6 +27,7 @@ dependencies:
 - yesod
 - yesod-persistent
 - yesod-core
+- yesod-static
 - persistent
 - persistent-mysql >= 2.13.1
 - monad-logger
@@ -40,6 +41,8 @@ dependencies:
 - text
 - Cabal
 - transformers
+- template-haskell
+- syb
 
 executables:
   hansible-exe:

@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -12,6 +13,7 @@ module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybook
 
 import DatabaseUtil
 import ScheduleFormat
+import Parser
 import TomlishParser
 
 import qualified Data.Map as M
@@ -31,12 +33,12 @@ data PlaybookConfiguration = PlaybookConfiguration
 parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
 parseConfigFile path = do
     contents <- readFile $ path ++ "/hansible.conf"
-    return $ case parse parseTop contents of
+    return $ case compileTomlish contents of
                Nothing    -> []
-               Just trees -> mapMaybe parseTomlishTree trees
+               Just trees -> mapMaybe (parseTomlishTree . (:[])) trees
 
-parseTomlishTree :: TomlishTree -> Maybe PlaybookConfiguration
-parseTomlishTree (Node "run" [Node name [Leave "file" (TomlishString f), Leave "schedule" (TomlishString s)]]) =
+parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
+parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
     case parseScheduleFormat s of
       Nothing -> Nothing
       Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
