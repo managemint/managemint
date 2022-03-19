@@ -61,9 +61,9 @@ instance (Lift a, Lift b) => Lift (Tree a b) where
 -- <Node>    ::= <Key> = <Value> \n <Node> | <Key> = <Value>
 -- <Path>    ::= <Key>.<Path> | <Key>
 -- <Key>     ::= Alphanumeric String (No Spaces)
--- <Value>   ::= Integer Value | <Quoted String>
+-- <Value>   ::= Integer Value | <Quoted String> | [ <Values> ]
+-- <Values>  ::= e | <Value>, <Values>
 -- <Quoted String> ::= " String ohne Quotes und Newline "
-
 
 failParse :: MonadFail m => String -> m [TomlishTree]
 failParse s = case compileTomlish s of
