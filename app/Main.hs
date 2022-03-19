@@ -37,6 +37,8 @@ import Control.Concurrent.Async
 import Data.Maybe
 import Data.Foldable
 
+import TomlishParser
+
 data AddRepository = AddRepository
         { repoURL :: Text
         , repoBranch :: Text
@@ -217,11 +219,17 @@ connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
                                     , connectPassword = "AffqDbF2Vw5Aq7EHferw"
                                     , connectDatabase = "hansible"
                                     }
+name = "Test"
+f = "pb.yml"
+s = "mon"
 
+a :: Maybe [TomlishTree]
+a = [tomlish|[run]\nfile = 'asd'\nschedule = 'asd'|]
 main :: IO ()
 main = do
-    runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
-        flip runSqlPersistMPool pool $ do
-            runMigration migrateAll
-        _ <- async $ schedule pool
-        runWebserver pool
+    print a
+    --runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
+    --    flip runSqlPersistMPool pool $ do
+    --        runMigration migrateAll
+    --    _ <- async $ schedule pool
+    --    runWebserver pool

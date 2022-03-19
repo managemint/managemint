@@ -1,3 +1,4 @@
+{-# LANGUAGE QuasiQuotes #-}
 {- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -8,7 +9,7 @@
  -
  -}
 
-module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
+--module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
 
 import DatabaseUtil
 import ScheduleFormat
@@ -29,19 +30,25 @@ data PlaybookConfiguration = PlaybookConfiguration
     }
     deriving (Show)
 
-parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
-parseConfigFile path = do
-    contents <- readFile $ path ++ "/hansible.conf"
-    return $ case compileTomlish contents of
-               Nothing    -> []
-               Just trees -> mapMaybe parseTomlishTree trees
+foo :: Tomlishs -> Bool
+foo [tomlish|hallo = $hi|] = hi == "hi"
+foo _ = False
 
-parseTomlishTree :: TomlishTree -> Maybe PlaybookConfiguration
-parseTomlishTree (Node (TomlishKey "run") [Node (TomlishKey name) [Leave (TomlishKey "file") (TomlishString f), Leave (TomlishKey "schedule") (TomlishString s)]]) =
-    case parseScheduleFormat s of
-      Nothing -> Nothing
-      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
-parseTomlishTree _ = Nothing
+--parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
+--parseConfigFile path = do
+--    contents <- readFile $ path ++ "/hansible.conf"
+--    return $ case compileTomlish contents of
+--               Left  err -> []
+--               Right trees -> mapMaybe parseTomlishTree trees
+
+-- [tomlish|[run.$name]\nfile = $f\nschedule = $s|]
+--parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
+--parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
+--parseTomlishTree (Node (TomlishKey "run") [Node (TomlishKey name) [Leave (TomlishKey "file") (TomlishString f), Leave (TomlishKey "schedule") (TomlishString s)]]) =
+--    case parseScheduleFormat s of
+--      Nothing -> Nothing
+--      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
+--parseTomlishTree _ = Nothing
 
 writePlaybookInDatabase :: Key Project -> PlaybookConfiguration -> ReaderT SqlBackend IO (Key Playbook)
 writePlaybookInDatabase key p = do
