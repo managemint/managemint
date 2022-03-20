@@ -21,14 +21,15 @@ import ScheduleFormat
 import Config
 
 import Data.Char (isAlphaNum)
-import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime, addLocalTime)
+import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
 import Data.Time.Clock.Compat (getCurrentTime)
-import Data.List (sort, (\\), foldl', nub)
-import Data.Maybe (isJust)
-import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton, keys, adjust, map, update)
-import Control.Lens ((^.), (%~), (%=), (<&>), (&), (?~), at, use, mapped, makeLenses, makeLensesFor)
+import Data.List ((\\), foldl')
+import Data.Maybe (isNothing)
+import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton, keys, update)
+import Control.Lens ((^.), (%~), (%=), (<&>), (&), (?~), at, mapped, makeLenses, makeLensesFor)
+import Control.Lens.Combinators (filtered)
 import Control.Monad (when)
-import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM, get, put)
+import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM)
 import Control.Monad.Trans.Reader (ReaderT)
 import Control.Concurrent (threadDelay)
 import Database.Persist.MySQL hiding (get)
@@ -55,30 +56,32 @@ schedule pool = runJobs pool M.empty
 
 -- | Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> Jobs -> IO ()
-runJobs pool jobs = do
-    jobs' <- runSqlPool (updateConfigRepoJobs jobs >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
-    js <- snd <$> runStateT (getDueJobs >>= executeJobs pool) jobs'
+runJobs pool jobMap = do
+    jobMap' <- runSqlPool (updateConfigRepoJobs jobMap >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
+    print $ "INFO: Got these jobs: " ++ show jobMap' -- TODO: Replace with logging
+    jobs <- snd <$> runStateT (getDueJobsCalculateTimestamp >>= executeJobs pool) jobMap'
     threadDelay 10000000
-    runJobs pool js
+    runJobs pool jobs
 
--- TODO: Cleaner and Docu
-getDueJobs :: StateT Jobs IO Jobs
-getDueJobs = do
+-- | Returns the jobs which are due and calculates the next timestamps
+getDueJobsCalculateTimestamp :: StateT Jobs IO Jobs
+getDueJobsCalculateTimestamp = do
     time <- liftIO getTime
-    jobs <- get
-    let jobsDue = M.filter (\j -> maybe True (<= time) (j^.timeDue)) jobs
-    let jobsDue' = foldl (flip $ M.update (\j -> Just $ j & timeDue ?~ nextInstance time (j^.scheduleFormat))) jobs (M.keys jobsDue)
-    put jobsDue'
-    return $ M.filter (\j -> maybe False (<= time) (j^.timeDue)) jobsDue'
+    traverse . filtered (\j -> isNothing (j^.timeDue)) %= calAndInsertNextInstance time
+    jobs <- gets (M.filter (\j -> maybe False (<= time) (j^.timeDue)))
+    modify $ flip (foldr (M.update (Just . calAndInsertNextInstance time))) (M.keys jobs)
+    return jobs
+        where calAndInsertNextInstance time j = j & timeDue ?~ nextInstance time (j^.scheduleFormat)
 
 -- | Executes the jobs and removes the user jobs from the job templates
 executeJobs :: ConnectionPool -> Jobs -> StateT Jobs IO ()
 executeJobs pool jobs = do
+    liftIO $ print $ "INFO: I will execute the following jobs: " ++ show jobs -- TODO: Replace with logging
     mapM_ (executeJob pool) $ M.toList jobs
     modify $ M.filter (^. systemJob)
 
 -- | Executes a job and writes the run into the database
--- If the job failes, increases the failcount, else resets it
+-- If the job failed increases the failcount, else resets it
 executeJob :: ConnectionPool -> (String,Job) -> StateT Jobs IO ()
 executeJob pool (name,job) = do
       time <- liftIO getTime
