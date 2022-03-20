@@ -22,7 +22,7 @@ import Config
 import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
 import Data.Time.Clock.Compat (getCurrentTime)
-import Data.List (sort, (\\), foldl')
+import Data.List (sort, (\\), foldl', nub)
 import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton)
 import Control.Lens ((^.), (%~), (%=), (<&>), (&), at, use, mapped, makeLenses, makeLensesFor)
 import Control.Monad (when)
@@ -70,7 +70,7 @@ calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (tem
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
-    time <- liftIO getTime <&> (& localTimeOfDayL %~ (`addTimeOfDay` TimeOfDay{todHour=0,todMin=1,todSec=0})) -- Rounds to the next second
+    time <- liftIO getTime
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
 -- | Executes the jobs and removes the user jobs from the job templates
@@ -211,7 +211,7 @@ readJobQueueDatabase = do
 
 createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
 createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=scheduleNext, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
+    JobTemplate{_scheduleFormat=Now, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=projectOid (entityVal proj)}
 
 -- | Assumes ssh format (e.g. @git@git.example.com:test/test-repo.git@) and return the path (e.g. @test/test-repo@)
