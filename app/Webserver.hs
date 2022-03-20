@@ -289,7 +289,7 @@ postHomeR = do
     ((resultDeleteRepo, _), _) <- runFormPost $ identifyForm (pack "deleteRepo") $ buttonForm 0
     handleFormSuccess resultDeleteRepo (\(ButtonForm val) -> runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]))
     ((resultRunPlaybook, _), _) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm 0
-    handleFormSuccess resultDeleteRepo (\(ButtonForm val) -> runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" ""))
+    handleFormSuccess resultRunPlaybook (\(ButtonForm val) -> runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" ""))
     redirect HomeR
 
 getRunR :: Int -> Handler Html
