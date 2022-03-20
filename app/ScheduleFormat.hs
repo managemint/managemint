@@ -25,7 +25,7 @@ import Control.Applicative
 import Text.Read
 import Parser
 
-data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime}
+data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime} | Now
 data ScheduleTime =
     ScheduleTime { _startTime :: [TimeOfDay]
                  , _repetitionTime :: [TimeOfDay]
@@ -39,7 +39,8 @@ instance Show ScheduleTime where --TODO: Debugging purpose, remove or change!!
     show s = intercalate "," (map show (s^.startTime)) ++ "/" ++ intercalate "," (map show (s^.repetitionTime))
 
 instance Show Schedule where --TODO: Debugging purpose, remove or change!!
-    show s = intercalate "," (map show (s^.scheduleDay)) ++ " " ++ maybe [] show (s^.scheduleTime)
+    show Now = "Now"
+    show s = intercalate "," (map show (s^.scheduleDay)) ++ " " ++ maybe [] show (s ^?! scheduleTime)
 
 allFullHours :: [TimeOfDay]
 allFullHours = take 24 $ iterate (addTimeOfDay (dayFractionToTimeOfDay (1/24))) midnight
@@ -162,10 +163,11 @@ parseBetween l u = Parser $ \s -> let (m,r) = splitAtExactly (length (show u)) s
 
 -- | Given a time and a schedule expression, calculates the soonest time that matches the expression
 nextInstance :: LocalTime -> Schedule -> LocalTime
+nextInstance time Now = time
 nextInstance time schedule = minimum $ filter (>= time) allPossibleTimes
     where
         allPossibleTimes = LocalTime <$> instanceOfDaysOfWeek (localDay time) (schedule^.scheduleDay)
-                                     <*> case schedule^.scheduleTime of
+                                     <*> case schedule ^?! scheduleTime of
                                            Nothing -> pure midnight
                                            Just s  -> scheduleTimeToList s
 
