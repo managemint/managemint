@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {- app/Main.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -35,9 +34,6 @@ monitorStatus :: (Show a) => [Async a] -> IO ()
 monitorStatus as = do
     threadDelay 1000000
     (mapM checkThreadOk =<< mapM poll as) >>= (`when` monitorStatus as) . and
-
-schedu = threadDelay 20000000
-websev = threadDelay 10000000
 
 main :: IO ()
 main = do
