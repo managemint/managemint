@@ -36,7 +36,7 @@ Die installation erfolgt im jeweiligen Quellcode-Ordner mit `pip install .` bzw.
 Hierfür empfiehlt sich ein Virtualenv.
 
 Zur Ausführung wird weiter eine MySQL-Datenbank benötigt (getestet mit MariaDB 10.5).
-Die Zugansdaten müssen in `app/Main.hs` angepasst werden.
+Die Zugansdaten müssen in `app/Config.hs` angepasst werden.
 
 Das Webinterface ist nach korrekter Konfiguration auf port `3000` zu erreichen.
 
