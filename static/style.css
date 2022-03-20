@@ -72,6 +72,10 @@ p.header {
 	margin-bottom:0px;
 }
 
+div.content {
+	margin-top: var(--header-height);
+}
+
 div.footer {
 	position:fixed;
 	left:0px;
