@@ -117,9 +117,9 @@ statusWidget text clazz = do
 
 eventToStatus :: Event -> (Widget, Status)
 eventToStatus event
-  | eventIs_changed event = (statusWidget "CHANGED" "status-changed", Ok)
   | eventIs_failed event && eventIgnore_errors event = (statusWidget "FAILED(IGNORED)" "status-failed-ignored", FailedIgnored)
   | eventIs_failed event = (statusWidget "FAILED" "status-failed", Failed)
+  | eventIs_changed event = (statusWidget "CHANGED" "status-changed", Ok)
   | eventIs_skipped event = (statusWidget "SKIPPED" "status-skipped", Ok)
   | eventIs_unreachable event = (statusWidget "UNREACHABLE" "status-unreachable", Failed)
   | otherwise = (statusWidget "OK" "status-ok", Ok)
@@ -271,6 +271,7 @@ getHomeR = do
                 <ul class="projects">
                     $forall entity <- projects
                         ^{projectWidget entity pool}
+                <br>
                 <form method=post action=@{HomeR} enctype=#{enctype} id="addrepo">
                     ^{widgetAddRepo}
                     <button>Add
