@@ -11,11 +11,18 @@
 module Config where
 -- Format: <module><Name>
 
-sockReadLen :: Int
-sockReadLen = 2048
+sockReadLen = 2048 :: Int
+
 schedulerFailMax = 3 :: Int
 schedulerUserTemplateKey = "USERTEMPLATE" -- Parser is not allowed to parse a job name starting with this string
 schedulerFolders = ["app",".stack-work","venv","csrc",".git","static"] -- TODO: Remove this as soon as the repos live in their own folder
 schedulerRepoRoot = "." :: FilePath
 
 executorSockPath = "/tmp/hansible.sock"
+
+webserverPort = 3000 :: Int
+
+databaseUtilConnectHost     = "mdbtest-11.my.cum.re"
+databaseUtilConnectUser     = "hansible"
+databaseUtilConnectPassword = "AffqDbF2Vw5Aq7EHferw"
+databaseUtilConnectDatabase = "hansible"

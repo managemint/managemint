@@ -23,6 +23,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module DatabaseUtil where
 
+import Config
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
@@ -88,8 +89,8 @@ addEvent event = runSqlPool (insert event)
 data Hansible = Hansible{ connections :: ConnectionPool, getStatic :: Static }
 
 connectionInfo :: ConnectInfo
-connectionInfo = defaultConnectInfo { connectHost     = "mdbtest-11.my.cum.re"
-                                    , connectUser     = "hansible"
-                                    , connectPassword = "AffqDbF2Vw5Aq7EHferw"
-                                    , connectDatabase = "hansible"
+connectionInfo = defaultConnectInfo { connectHost     = databaseUtilConnectHost
+                                    , connectUser     = databaseUtilConnectUser
+                                    , connectPassword = databaseUtilConnectPassword
+                                    , connectDatabase = databaseUtilConnectDatabase
                                     }
