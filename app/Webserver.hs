@@ -27,6 +27,7 @@
 module Webserver where
 
 import Scheduler
+import Config
 import Data.Text
 import Yesod
 import Yesod.Static
@@ -317,5 +318,5 @@ getRunR runInt= do
 runWebserver :: ConnectionPool -> IO ()
 runWebserver conn = do
     x <- static staticFilePath
-    warp 3000 Hansible { connections = conn, getStatic = x }
+    warp webserverPort Hansible { connections = conn, getStatic = x }
 
