@@ -26,13 +26,10 @@
 #include <git2/types.h>
 #include <string.h>
 
-//TODO Remove
-#include <stdio.h>
 
 #define ASSERT_GIT_CALL(a) {if(a!=0){ret=HSGIT_CALL_FAILED; update_last_error(); goto error;}}
 
 #define _GIT_DEFAULT_REMOTE "origin"
-
 #define _GIT_ERRSTR_LEN 512
 
 // https://libgit2.org/docs/guides/101-samples/
@@ -51,6 +48,10 @@ static int auth_callback(git_cred **out, const char *url, const char *username_f
 }
 
 // TODO ugly AF...
+/**
+ * check, if refspecs match.
+ *
+ */
 static int refspecs_match(const char *_name, const char *_ref) {
 	size_t len_ref = 0;
 	size_t len_name = 0;
@@ -81,6 +82,9 @@ static int refspecs_match(const char *_name, const char *_ref) {
 	return 0;
 }
 
+/**
+ * Take the first remote OID that matches the target one.
+ */
 static int fetchhead_ref_callback(const char *_name, const char *_url, const git_oid *_oid, unsigned int _is_merge, void *_payload) {
 	if (!refspecs_match(_name, (char*)_payload))
 		return 0;
@@ -93,14 +97,10 @@ static int fetchhead_ref_callback(const char *_name, const char *_url, const git
 	return 0;
 }
 
-static void print_last_errstr() {
-	const git_error *err = git_error_last();
-
-	if (err) {
-		printf("%s\n", err->message);
-	}
-}
-
+/**
+ * Since we want to retrieve errstrings from outside the libgit-context,
+ * we need to copy them when they occur.
+ */
 static void update_last_error() {
 	char* err = git_error_last()->message;
 	strncpy( glbl__errmsg, err, _GIT_ERRSTR_LEN-1 );
@@ -111,6 +111,10 @@ char *get_last_error() {
 	glbl__errmsg[_GIT_ERRSTR_LEN-1] = '\0';
 	return glbl__errmsg;
 }
+
+/*
+ * Exported functions below. See header for docs.
+ */
 
 char *get_last_merge_oid() {
 	char *ret = NULL;
@@ -180,7 +184,6 @@ end:
 	git_libgit2_shutdown();
 	return ret;
 error:
-	// TODO delete directory if failed?
 	goto end;
 }
 
@@ -215,6 +218,7 @@ int do_git_pull(char* _path, char* _refspec) {
 	glbl__merge_oid_set = 0;
 	git_repository_fetchhead_foreach( repo, fetchhead_ref_callback, _refspec );
 
+    // _refspec does not track any remote HEAD
 	if(!glbl__merge_oid_set) {
 		ret = HSGIT_REFSPEC_NOT_MERGEABLE;
 		goto error;
@@ -223,17 +227,17 @@ int do_git_pull(char* _path, char* _refspec) {
 	ASSERT_GIT_CALL( git_annotated_commit_lookup(&heads[0], repo, &glbl__merge_oid) );
 	ASSERT_GIT_CALL( git_merge_analysis(&merge_analysis, &merge_pref, repo, (const git_annotated_commit **)heads, 1) );
 
+    // We dont't need to FF if nothing changed
 	if( merge_analysis & GIT_MERGE_ANALYSIS_UP_TO_DATE ) {
 		ret = HSGIT_OK;
 		goto end;
 	}
 
+    // Check, if FF is possible, Abort if not
 	if( ! (merge_analysis & GIT_MERGE_ANALYSIS_FASTFORWARD) ) {
 		ret = HSGIT_NO_FF_POSSIBLE;
 		goto error;
 	}
-
-	//ASSERT_GIT_CALL( git_merge(repo, (const git_annotated_commit **)heads, 1, &merge_opts, &checkout_opts) );
 
 	ASSERT_GIT_CALL( git_object_lookup(&ff_target, repo, &glbl__merge_oid, GIT_OBJECT_COMMIT) );
 	ASSERT_GIT_CALL( git_checkout_tree(repo, ff_target, &checkout_opts) );

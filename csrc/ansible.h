@@ -8,4 +8,8 @@
  *
 */
 
+/**
+ * Run Ansible Playbook.
+ * Chnaged to directory _path, then runs _playbook
+ */
 int ansible( char* _path, char *_playbook, char *_limit, char *_tag );
