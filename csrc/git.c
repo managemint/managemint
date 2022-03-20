@@ -50,7 +50,8 @@ static int auth_callback(git_cred **out, const char *url, const char *username_f
 // TODO ugly AF...
 /**
  * check, if refspecs match.
- *
+ * _name can be a full path, eg. refs/remotes/origin/main.
+ * this would match _ref = "main"
  */
 static int refspecs_match(const char *_name, const char *_ref) {
 	size_t len_ref = 0;
