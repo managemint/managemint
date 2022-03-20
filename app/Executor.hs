@@ -22,6 +22,8 @@ import Foreign.C.String
 
 import Control.Concurrent.Async
 import Control.Monad
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
 
 import Data.Maybe
 
@@ -31,6 +33,8 @@ import System.Directory
 import Text.JSON
 import Text.JSON.Generic
 import Text.Printf
+
+import Network.Socket (Socket)
 
 import Database.Persist.MySQL
 import Database.Persist
@@ -104,46 +108,47 @@ newtype AnsibleEvent = AnsibleEvent
 sockPath = executorSockPath
 
 -- | Write Runner result to database
-writeResult :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
-writeResult arr pool rid = void $ addEvent (Event (taskARR arr) (taskIdARR arr)
-            (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
-            (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
-            (is_item arr) (item arr) "Output not implemented" ) pool
+writeResult :: AnsibleRunnerResult -> ReaderT (ConnectionPool, RunId, Socket) IO ()
+writeResult arr = do
+            (pool, rid, _) <- ask
+            liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
+                (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
+                (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
+                (is_item arr) (item arr) "Output not implemented" ) pool
 
 -- | handle runner start, unused
-writeStart :: AnsibleRunnerStart -> ConnectionPool -> RunId -> IO ()
-writeStart ars pool rid = return ()
+writeStart :: AnsibleRunnerStart -> ReaderT (ConnectionPool, RunId, Socket) IO ()
+writeStart ars = return ()
 
 -- | Determine, which callback event was recieved
-processAnsibleEvent :: String -> String -> ConnectionPool -> RunId -> IO ()
+processAnsibleEvent :: String -> String -> ReaderT (ConnectionPool, RunId, Socket) IO ()
 processAnsibleEvent e s = case e of
         "task_runner_result" -> writeResult (decodeJSON s :: AnsibleRunnerResult)
         "task_runner_start"  -> writeStart  (decodeJSON s :: AnsibleRunnerStart)
-        _ -> \_ _ -> return ()
+        _ -> return ()
 
---processAnsibleEvent e s _ _ =  return ()
+processAnsibleCallbacks :: ReaderT (ConnectionPool, RunId, Socket) IO ()
+processAnsibleCallbacks = forever $ do
+    (_, _, sock) <- ask
+
+    callbackRaw <- liftIO $ readSocket sock
+    processAnsibleEvent (event (decodeJSON callbackRaw :: AnsibleEvent)) callbackRaw
 
 -- | execute Ansible Playbook defined by AnsiblePlaybook type,
--- | write results to database set by pool under RunID rid
--- | Return: True if run was OK, False otherwise
+-- write results to database set by pool under RunID rid
+-- Return: True if run was OK, False otherwise
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
 execPlaybook pool rid pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
-
         sock <- createBindSocket sockPath
 
-        pb <- async $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
-        as <- async $ forever $ do
-            callbackRaw <- readSocket sock
-            let callbackAE = decodeJSON callbackRaw :: AnsibleEvent
-            processAnsibleEvent (event callbackAE) callbackRaw pool rid
-
-        ret <- wait pb
+        cb  <- async $ runReaderT processAnsibleCallbacks (pool, rid, sock)
+        ret <- ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
 
         closeSocket sock
         -- We want to catch the "Bad File descriptor" of the previously
         -- closed socket
-        poll as >>= \x -> when (isNothing x) $ void(waitCatch as)
+        poll cb >>= \x -> when (isNothing x) $ void(waitCatch cb)
 
         removeFile sockPath
 
