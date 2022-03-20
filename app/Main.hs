@@ -17,7 +17,6 @@ import Control.Monad.Logger (runStderrLoggingT)
 import Control.Concurrent.Async
 import Webserver
 
-
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do

@@ -204,12 +204,7 @@ runWidget entity@(Entity runid run) pool = do
 
 playbookWidget :: Entity Playbook -> ConnectionPool -> Widget
 playbookWidget (Entity playbookid playbook) pool = do
-    ((resultRunPlaybook, widgetRunPlaybook), enctype) <- runFormPost $ identifyForm (pack ("runPlaybook" ++ show (fromSqlKey playbookid))) $ buttonForm (fromIntegral (fromSqlKey playbookid))
-    case resultRunPlaybook of
-        FormSuccess (ButtonForm val) -> do
-          runSqlPool (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "") pool
-          return ()
-        _ -> return ()
+    ((_, widgetRunPlaybook), enctype) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm (fromIntegral (fromSqlKey playbookid))
     runs <- runSqlPool (selectList [RunPlaybookId ==. playbookid] [Desc RunId]) pool
     toWidget
         [whamlet|
@@ -228,29 +223,24 @@ playbookWidget (Entity playbookid playbook) pool = do
 
 projectWidget :: Entity Project -> ConnectionPool -> Widget
 projectWidget (Entity projectid project) pool = do
-    ((resultDeleteRepo, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack ("deleteRepo" ++ show (fromSqlKey projectid))) $ buttonForm (fromIntegral (fromSqlKey projectid))
-    case resultDeleteRepo of
-        FormSuccess (ButtonForm val) -> do
-            runSqlPool (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]) pool
-            [whamlet||]
-        _ -> do
-            playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
-            toWidget
-                [whamlet|
-                    <li>
-                        Project: #{projectUrl project} (#{projectBranch project})
-                        <form method=post action=@{HomeR}>
-                            ^{widgetDeleteRepo}
-                            <button>Remove
-                        $if Prelude.null (projectErrorMessage project)
-                            <ul class="playbooks">
-                                $forall entity <- playbooks
-                                    ^{playbookWidget entity pool}
-                        $else
-                            <br>
-                            <font color="red">
-                                #{projectErrorMessage project}
-                |]
+    ((_, widgetDeleteRepo), enctype) <- runFormPost $ identifyForm (pack "deleteRepo") $ buttonForm (fromIntegral (fromSqlKey projectid))
+    playbooks <- runSqlPool (selectList [PlaybookProjectId ==. projectid] [Asc PlaybookId]) pool
+    toWidget
+        [whamlet|
+            <li>
+                Project: #{projectUrl project} (#{projectBranch project})
+                <form method=post action=@{HomeR}>
+                    ^{widgetDeleteRepo}
+                    <button>Remove
+                $if Prelude.null (projectErrorMessage project)
+                    <ul class="playbooks">
+                        $forall entity <- playbooks
+                            ^{playbookWidget entity pool}
+                $else
+                    <br>
+                    <font color="red">
+                        #{projectErrorMessage project}
+        |]
 
 hansibleStyle :: Widget -> Widget
 hansibleStyle inp = do
@@ -259,10 +249,7 @@ hansibleStyle inp = do
 
 getHomeR :: Handler Html
 getHomeR = do
-    ((resultAddRepo, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
-    case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
-        _ -> pure ()
+    ((_, widgetAddRepo), enctype) <- runFormPost $ identifyForm "addRepo" addRepoForm
     projects <- runDB $ selectList [] [Asc ProjectId]
     Hansible pool _ <- getYesod
     defaultLayout
@@ -271,13 +258,30 @@ getHomeR = do
             <ul class="projects">
                 $forall entity <- projects
                     ^{projectWidget entity pool}
-        <form method=post action=@{HomeR} enctype=#{enctype}>
+        <form method=post action=@{HomeR} enctype=#{enctype} id="addrepo">
             ^{widgetAddRepo}
             <button>Add
         |])
 
 postHomeR :: Handler Html
-postHomeR = getHomeR
+postHomeR = do
+    ((resultAddRepo, _), _) <- runFormPost $ identifyForm "addRepo" addRepoForm
+    case resultAddRepo of
+        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
+        _ -> pure ()
+    ((resultDeleteRepo, _), _) <- runFormPost $ identifyForm (pack "deleteRepo") $ buttonForm 0
+    case resultDeleteRepo of
+        FormSuccess (ButtonForm val) -> do
+            runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)])
+        _ -> do
+            pure ()
+    ((resultRunPlaybook, _), enctype) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm 0
+    case resultRunPlaybook of
+        FormSuccess (ButtonForm val) -> do
+          runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "")
+          return ()
+        _ -> return ()
+    redirect HomeR
 
 getRunR :: Int -> Handler Html
 getRunR runInt= do
