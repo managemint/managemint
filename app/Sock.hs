@@ -16,9 +16,11 @@ import Network.Socket
 import Network.Socket.ByteString (recv)
 import Data.ByteString.Internal
 
+-- | Length to read from Socket
 readLen :: Int
 readLen = sockReadLen
 
+-- | Create and bind a UNIX socket at path s
 createBindSocket :: String -> IO Socket
 createBindSocket s = do
         sock <- socket AF_UNIX Datagram 0
@@ -32,6 +34,7 @@ readForever :: Socket -> IO()
 readForever s = forever $ do
         print =<< recv s readLen
 
+-- | Read from a Socket into a String
 readSocket :: Socket -> IO [Char]
 readSocket s = do
     ret <- recv s readLen

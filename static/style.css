@@ -1,27 +1,91 @@
 :root {
 	--bg: #fff;
+	--bg-secondary: #aaa;
 	--primary: #000;
-	--secondary: #aaa;
+	--secondary: #777;
 	--highlight: blue;
 
 	--font-family: "sans-serif";
+	--font-size: 16px;
 
 	/* Status Colors */
 	--status-running: blue;
 	--status-ok: green;
+	--status-changed: orange;
+	--status-skipped: lightblue;
 	--status-failed: red;
-	--status-changed: yellow;
+	--status-failed-ignored: #fa5858;
+	--status-unreachable: darkred;
+	
+
+	/* Sizes */
+	--header-height: 40px;
+	--header-font-size: 30px;
 }
 
-
 html {
-	background: var(--bg);
-	color: var(--primary);
-	font-family: var(--font-family);
 }
 
 body {
+	background: var(--bg);
+	color: var(--primary);
+	font-family: var(--font-family);
+  font-size: var(--font-size);
 }
+
+/*
+ * SECTIONS
+ */
+
+/*
+<div class="header">
+        <p class="header">
+                <a href=/><img class="header" src=logo.png/></a>hansible
+        </p>
+</div>
+*/
+
+div.header {
+	position: fixed;
+	left: 0px;
+	top:0px;
+	height:var(--header-height);
+	width: 100%;
+	font-size: var(--header-font-size);
+	color: var(--primary);
+	background:var(--bg-secondary);
+	text-align: left;
+	vertical-align: middle;
+}
+
+img.header {
+	top: 0px;
+	left: 0px;
+	float: left;
+	height: var(--header-height);
+	object-fit: scale-down;
+}
+
+p.header {
+	text-indent: 0px;
+	margin-top:0px;
+	margin-bottom:0px;
+}
+
+div.footer {
+	position:fixed;
+	left:0px;
+	bottom:0px;
+	height:15px;
+	width:100%;
+	font-size: 10px arial;
+	color:#777;
+	text-align:center;
+}
+
+/*
+ * ELEMENTS
+ */
 
 ul {
 	/*margin-left: 20px;
@@ -63,10 +127,13 @@ button {
 	border: none;
 }
 
-div.required {
+div.required { /*Yesod internal div*/
 	display: inline;
 }
 
+/*
+ * STATUS
+ */
 
 .status-running {
 	color: var(--status-running);
@@ -76,13 +143,26 @@ div.required {
 	color: var(--status-ok);
 }
 
+.status-skipped {
+	color: var(--status-skipped);
+}
+
 .status-failed {
 	color: var(--bg);
 	background-color: var(--status-failed);
 }
 
+.status-failed-ignored {
+	color: var(--bg);
+	background-color: var(--status-failed-ignored);
+}
+
 .status-changed {
 	color: var(--status-changed);
+}
+
+.status-unrechable {
+	color: var(--status-unrechable);
 }
 
 .secondary {
@@ -92,4 +172,3 @@ div.required {
 .highlight {
 	color: var(--highlight)
 }
-

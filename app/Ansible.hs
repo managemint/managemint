@@ -18,6 +18,8 @@ import Control.Monad
 
 foreign import ccall "ansible.h ansible" c_ansible :: CString -> CString -> CString -> CString -> IO Int
 
+-- | Calls ansible via FFI and hansible_glue.
+-- | Args: Path -> Playbook Filename -> Limit -> Tags
 ansiblePlaybook :: String -> String -> String -> String -> IO Int
 ansiblePlaybook _path _pb _limit _tag = do
         arg@[path, pb, limit, tag] <- mapM newCAString [_path, _pb, _limit, _tag]

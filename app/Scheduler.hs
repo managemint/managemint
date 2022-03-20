@@ -153,7 +153,7 @@ getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) te
 -- Writes the parse status and the playbooks specified in the config file in the database and creates the job-tomplates
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
 readAndParseConfigFile oid path p = do
-    pcs <- parseConfigFile (entityKey p) path
+    pcs <- liftIO $ parseConfigFile path
     if null pcs then update (entityKey p) [ProjectErrorMessage =. "Error in the config file"] >> return M.empty else do
         keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
         return $ M.unions $ zipWith (createTemplateFromPlaybookConfiguration oid path) keys pcs

@@ -103,15 +103,18 @@ newtype AnsibleEvent = AnsibleEvent
 -- TODO put in /run
 sockPath = executorSockPath
 
+-- | Write Runner result to database
 writeResult :: AnsibleRunnerResult -> ConnectionPool -> RunId -> IO ()
 writeResult arr pool rid = void $ addEvent (Event (taskARR arr) (taskIdARR arr)
             (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
             (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
             (is_item arr) (item arr) "Output not implemented" ) pool
 
+-- | handle runner start, unused
 writeStart :: AnsibleRunnerStart -> ConnectionPool -> RunId -> IO ()
 writeStart ars pool rid = return ()
 
+-- | Determine, which callback event was recieved
 processAnsibleEvent :: String -> String -> ConnectionPool -> RunId -> IO ()
 processAnsibleEvent e s = case e of
         "task_runner_result" -> writeResult (decodeJSON s :: AnsibleRunnerResult)
@@ -120,6 +123,9 @@ processAnsibleEvent e s = case e of
 
 --processAnsibleEvent e s _ _ =  return ()
 
+-- | execute Ansible Playbook defined by AnsiblePlaybook type,
+-- | write results to database set by pool under RunID rid
+-- | Return: True if run was OK, False otherwise
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
 execPlaybook pool rid pb = do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath

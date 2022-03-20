@@ -1,31 +1,78 @@
 # hansible
 
-![hansible](logo.png "hansible")
+![hansible](static/logo.png "hansible")
 
-Teilnehmer:
+## Verwendung
 
-- Konstantin Grabmann
-- Jonas Gunz
-- Paul Trojahn
+### Compilieren
 
+Neben Stack und den damit installierten dependencies benötigt hansible `python` und `libgit2`.
+Da CPython seine Header und Library in versionsspezifischen Ordnern hinterlegt, muss diese in der `package.yml` entsprechend angegeben werden:
 
+```yml
+...
 
-### management frontend für ansible
+c-sources: csrc/*.c
+cc-options:
+  - '-D_PYINCLUDE=<python[PYTHON VERSION]/Python.h>'
+include-dirs: csrc/
+extra-libraries:
+  - python[PYTHON VERSION]
+  - git2
 
+...
+```
 
+Getestete Versionen:
 
-##### Beschreibung
+* `python` 3.9, 3.10
+* `libgit2` 1.1, 1.4
 
-[**Ansible** ist ein Open-Source Automatisierungs-Werkzeug zur Orchestrierung und allgemeinen Konfiguration und Administration von Computern.](https://de.wikipedia.org/wiki/Ansible) Beispielsweise sorgen wir damit für einheitliche Konfiguration auf Servern. Basispakete werden installiert, Nutzer werden erstellt, aber auch komplexere Aufgaben wie die Konfiguration von Webservern sind automatisierbar. 
+### Setup
 
-Momentan wird das Ansible Management unserer Serverstruktur mit Jenkins verwaltet. Da Jenkins nicht dafür ausgelegt ist, handelt es sich nur um eine Übergangslösung, die von Shell Scripten zusammengehalten wird. 
+Neben dem basis hansible-Projekt werden außerdem die python-Module `hansible_glue` und `ansible`,
+sowie das Ansible-Galaxy Modul `hansible_modules` benötigt.
+Die installation erfolgt im jeweiligen Quellcode-Ordner mit `pip install .` bzw. `ansible-galaxy collection install .`.
+Hierfür empfiehlt sich ein Virtualenv.
 
-Wir wollen ein für diesen Zweck zugeschnittenes CI System programmieren. Dafür werden wir ein funktionales Web Frontend implementieren. Die Ansible- , sowie die Systemkonfiguration sollten aus einer Git Repo entnommen werden. Die Ergebnisse der Ansible Durchläufe werden im Webinterface anschaulich aufbereitet. 
+Zur Ausführung wird weiter eine MySQL-Datenbank benötigt (getestet mit MariaDB 10.5).
+Die Zugansdaten müssen in `app/Main.hs` angepasst werden.
 
+Das Webinterface ist nach korrekter Konfiguration auf port `3000` zu erreichen.
 
+### Projekte
 
-##### Vertiefende Themen
+Ausgangspunkt ist eine Repository mit Ansible-Struktur, siehe `ansible-example`.
+In dessen Wurzel wird nun eine `hansible.conf`-Datei angelegt.
 
-- Webentwicklung für das Webinterface
-- Datenbankanbindung für persistente Speicherung von Konfigurations- und Anwendungsdaten
-- Monadentransformer für gleichzeitiges Schreiben in die Datenbank und Liveausgabe 
+Diese kann wie folgt aussehen:
+
+```toml
+[run.createUsers]
+file = "pb_users.yml"
+schedule = "20:00"
+
+[run.createBackups]
+file = 'pb_backups.yml'
+schedule = "mon..fri,sun /04:00"
+```
+
+In diesem Beispiel werden zwei Runs definiert.
+Der erste mit Namen `createUsers` führt das Playbook `pb_users.yml` jeden Tag um 20:00h aus.
+`createBackups` startet `pb_backups.yml` Werktags und Sonntags alle vier Stunden.
+
+### Schedule Format
+
+Das Format ist inspiriert vom ProxMox Backup Schedule Format, siehe [ProxMox Dokumentation](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_calendar_events)
+
+Grammatik siehe Quellcode. Hier ein paar Beispiele:
+
+| Schedule Format     | Alternativ      | Bedeutung |
+| --------            | --------        | -------- |
+| mon,tue,wed,thu,fri | mon..fri        | Werktags um 0:00 |
+| mon,tue,wed,sun     | mon..wed,sun    | Montags - Mittwochs und Sonntags um 0:00 |
+| 12:05               | 12:05           | Jeden Tag um 12:05 |
+| fri 12:00/20        | fri 12:00/00:20 | Freitag um 12:00, 12:20 und 12:40 |
+| 24                  | -               | 24 Minuten nach jeder vollen Stunde |
+| 14:00/02:10         | -               | ab 14:00 alle zwei Stunden und zehn Minuten bis 22:40 |
+| /5                  | 0/5             | Alle fünf Minuten |
