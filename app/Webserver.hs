@@ -286,8 +286,7 @@ postHomeR = do
     case resultDeleteRepo of
         FormSuccess (ButtonForm val) -> do
             runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)])
-        _ -> do
-            pure ()
+        _ -> pure ()
     ((resultRunPlaybook, _), enctype) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm 0
     case resultRunPlaybook of
         FormSuccess (ButtonForm val) -> do

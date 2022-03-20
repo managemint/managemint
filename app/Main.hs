@@ -20,6 +20,6 @@ import Webserver
 main :: IO ()
 main = do
     runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
-        flip runSqlPersistMPool pool $ runMigration migrateAll
+        runSqlPersistMPool (runMigration migrateAll) pool
         _ <- async $ schedule pool
         runWebserver pool
