@@ -4,6 +4,30 @@
 
 ## Verwendung
 
+### Compilieren
+
+Neben Stack und den damit installierten dependencies benötigt hansible `python` und `libgit2`.
+Da CPython seine Header und Library in versionsspezifischen Ordnern hinterlegt, muss diese in der `package.yml` entsprechend angegeben werden:
+
+```yml
+...
+
+c-sources: csrc/*.c
+cc-options:
+  - '-D_PYINCLUDE=<python[PYTHON VERSION]/Python.h>'
+include-dirs: csrc/
+extra-libraries:
+  - python[PYTHON VERSION]
+  - git2
+
+...
+```
+
+Getestete Versionen:
+
+* `python` 3.9, 3.10
+* `libgit2` 1.1, 1.4
+
 ### Setup
 
 Neben dem basis hansible-Projekt werden außerdem die python-Module `hansible_glue` und `ansible`,
