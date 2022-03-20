@@ -280,18 +280,20 @@ postHomeR :: Handler Html
 postHomeR = do
     ((resultAddRepo, _), _) <- runFormPost $ identifyForm "addRepo" addRepoForm
     case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" "") >> pure ()
-        _ -> pure ()
+        FormSuccess (AddRepository repo branch) -> do
+            runDB ( insert $ Project (unpack repo) (unpack branch) "" "")
+            return ()
+        _ -> return ()
     ((resultDeleteRepo, _), _) <- runFormPost $ identifyForm (pack "deleteRepo") $ buttonForm 0
     case resultDeleteRepo of
         FormSuccess (ButtonForm val) -> do
             runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)])
-        _ -> pure ()
+        _ -> return ()
     ((resultRunPlaybook, _), enctype) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm 0
     case resultRunPlaybook of
         FormSuccess (ButtonForm val) -> do
-          runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "")
-          return ()
+            runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "")
+            return ()
         _ -> return ()
     redirect HomeR
 
