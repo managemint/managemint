@@ -10,7 +10,8 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
-module Scheduler (schedule) where
+--module Scheduler (schedule) where
+module Scheduler where
 
 import DatabaseUtil
 import ProjectConfig
@@ -23,78 +24,72 @@ import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime, addLocalTime)
 import Data.Time.Clock.Compat (getCurrentTime)
 import Data.List (sort, (\\), foldl', nub)
-import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton)
-import Control.Lens ((^.), (%~), (%=), (<&>), (&), at, use, mapped, makeLenses, makeLensesFor)
+import Data.Maybe (isJust)
+import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton, keys, adjust, map, update)
+import Control.Lens ((^.), (%~), (%=), (<&>), (&), (?~), at, use, mapped, makeLenses, makeLensesFor)
 import Control.Monad (when)
-import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM)
+import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM, get, put)
 import Control.Monad.Trans.Reader (ReaderT)
 import Control.Concurrent (threadDelay)
-import Database.Persist.MySQL
+import Database.Persist.MySQL hiding (get)
 import System.Directory (listDirectory, removeDirectoryRecursive, doesDirectoryExist)
 
 -- TODO: Implement prettier instance of Show
-data JobTemplate = JobTemplate {_scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _playbookId :: PlaybookId, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
-    deriving (Show)
-data Job = Job {_timeDue :: LocalTime, _templateName :: String}
-    deriving (Eq, Show)
-
-type JobTemplates = M.Map String JobTemplate
-type Jobs = [Job]
-
-instance Ord Job where
-    compare j1 j2 = compare (_timeDue j1) (_timeDue j2)
+data Job = Job {_timeDue :: Maybe LocalTime, _scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _playbookId :: PlaybookId, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
+type Jobs = M.Map String Job
 
 makeLenses ''Job
-makeLenses ''JobTemplate
+
+instance Show Job where
+    show j = j^.playbook ++ " at " ++ show (j^.timeDue)
+
+instance Eq Job where
+    j1 == j2 = j1^.timeDue == j2^.timeDue
+
+instance Ord Job where
+    compare j1 j2 = compare (j1^.timeDue) (j2^.timeDue)
+
 
 schedule :: ConnectionPool -> IO ()
 schedule pool = runJobs pool M.empty
 
 -- | Given a list of job templates, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
-runJobs :: ConnectionPool -> JobTemplates -> IO ()
-runJobs pool jobTempls = do
-    jobTempls' <- runSqlPool (updateConfigRepoJobTemplates jobTempls >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
-    js <- snd <$> runStateT (calculateNextInstances >>= getDueJobs >>= executeJobs pool) jobTempls'
+runJobs :: ConnectionPool -> Jobs -> IO ()
+runJobs pool jobs = do
+    jobs' <- runSqlPool (updateConfigRepoJobs jobs >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
+    js <- snd <$> runStateT (getDueJobs >>= executeJobs pool) jobs'
     threadDelay 10000000
     runJobs pool js
 
--- | Calculates the next job instances from the templates
-calculateNextInstances :: StateT JobTemplates IO Jobs
-calculateNextInstances = do
+-- TODO: Cleaner and Docu
+getDueJobs :: StateT Jobs IO Jobs
+getDueJobs = do
     time <- liftIO getTime
-    gets (map (calculateNextInstance time) . M.toList)
-
-calculateNextInstance :: LocalTime -> (String,JobTemplate) -> Job
-calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (templ^.scheduleFormat), _templateName = name}
-
-getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
-getDueJobs jobs = do
-    time <- liftIO getTime <&> addLocalTime 10
-    return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
+    jobs <- get
+    let jobsDue = M.filter (\j -> maybe True (<= time) (j^.timeDue)) jobs
+    let jobsDue' = foldl (flip $ M.update (\j -> Just $ j & timeDue ?~ nextInstance time (j^.scheduleFormat))) jobs (M.keys jobsDue)
+    put jobsDue'
+    return $ M.filter (\j -> maybe False (<= time) (j^.timeDue)) jobsDue'
 
 -- | Executes the jobs and removes the user jobs from the job templates
-executeJobs :: ConnectionPool -> Jobs -> StateT JobTemplates IO ()
+executeJobs :: ConnectionPool -> Jobs -> StateT Jobs IO ()
 executeJobs pool jobs = do
-    mapM_ (executeJob pool) jobs
+    mapM_ (executeJob pool) $ M.toList jobs
     modify $ M.filter (^. systemJob)
 
 -- | Executes a job and writes the run into the database
 -- If the job failes, increases the failcount, else resets it
-executeJob :: ConnectionPool -> Job -> StateT JobTemplates IO ()
-executeJob pool job = do
-    template <- use $ at (job^.templateName)
-    case template of
-      Nothing       -> liftIO $ print "Warning: A job was created from a nonexistent job template. This should not happen!" -- TODO: Replace with logging
-      Just template -> do
-          time <- liftIO getTime
-          runKey <- liftIO $ addRun (Run (template^.playbookId)
-                                         1
-                                         (template^.repoIdentifier)
-                                         (template^.systemJob)
-                                         (takeWhile (/= '.') (show time))) pool
-          success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=template^.repoPath, playbookName=template^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-          let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
-          at (job^.templateName) %= ((mapped.failCount) %~ if success then const 0 else (+1))
+executeJob :: ConnectionPool -> (String,Job) -> StateT Jobs IO ()
+executeJob pool (name,job) = do
+      time <- liftIO getTime
+      runKey <- liftIO $ addRun (Run (job^.playbookId)
+                                     1
+                                     (job^.repoIdentifier)
+                                     (job^.systemJob)
+                                     (takeWhile (/= '.') (show time))) pool
+      success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+      let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
+      at name %= ((mapped.failCount) %~ if success then const 0 else (+1))
 
 
 -- /SYSTEM JOBS/ --
@@ -112,55 +107,55 @@ executeJob pool job = do
 --             No  -> do nothing
 -- If something happend above, parse config file
 -- Create templates
-updateConfigRepoJobTemplates :: JobTemplates -> ReaderT SqlBackend IO JobTemplates
-updateConfigRepoJobTemplates templs = do
+updateConfigRepoJobs :: Jobs -> ReaderT SqlBackend IO Jobs
+updateConfigRepoJobs jobs = do
     projects <- getProjects
-    liftIO $ cleanupFoldersAndTemplates templs projects
-    mapM (updateSystemTemplate templs) projects <&> M.unions
+    liftIO $ cleanupFoldersAndJobs jobs projects
+    mapM (updateSystemJobs jobs) projects <&> M.unions
 
 -- | When a project is deleted in the database remove the folder and it's job templates
-cleanupFoldersAndTemplates :: JobTemplates -> [Entity Project] -> IO JobTemplates
-cleanupFoldersAndTemplates templs projects = do
+cleanupFoldersAndJobs :: Jobs -> [Entity Project] -> IO Jobs
+cleanupFoldersAndJobs jobs projects = do
     existingFolders <- listDirectory schedulerRepoRoot >>= filterM doesDirectoryExist
     let remove = existingFolders \\ (map projectToPath projects ++ schedulerFolders)
     liftIO $ print $ "INFO: Scheduler removed these folders: " ++ show remove -- TODO: Replace with logging
     mapM_ removeDirectoryRecursive remove
-    return $ foldl' (flip M.delete) templs remove
+    return $ foldl' (flip M.delete) jobs remove
 
 -- | Updates the system templates if the repo changed or doesn't locally exist, else leaves them unchanged
-updateSystemTemplate :: JobTemplates -> Entity Project -> ReaderT SqlBackend IO JobTemplates
-updateSystemTemplate templs project = do
+updateSystemJobs :: Jobs -> Entity Project -> ReaderT SqlBackend IO Jobs
+updateSystemJobs jobs project = do
     let oid = projectOid $ entityVal project
     ret' <- liftIO $ getRepo oid path url branch
-    let ret = ret' <&> if null templs then \(_,x) -> (True, x) else id
+    let ret = ret' <&> if null jobs then \(_,x) -> (True, x) else id
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e >> return M.empty
       Right (change,oid) -> do
         update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid]
         if change then readAndParseConfigFile oid path project
-                  else return $ getTemplatesFromProject templs project
+                  else return $ getJobsFromProject jobs project
     where
         url = projectUrl $ entityVal project
         path = projectToPath project
         branch = projectBranch $ entityVal project
 
-getTemplatesFromProject :: JobTemplates -> Entity Project -> JobTemplates
-getTemplatesFromProject templs project = M.filter (\t -> t^.repoPath == path) templs
+getJobsFromProject :: Jobs -> Entity Project -> Jobs
+getJobsFromProject jobs project = M.filter (\t -> t^.repoPath == path) jobs
     where path = projectToPath project
 
 -- | Tries to parse the config file in the folder pointed to by path.
 -- Writes the parse status and the playbooks specified in the config file in the database and creates the job-tomplates
-readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO JobTemplates
+readAndParseConfigFile :: String -> FilePath -> Entity Project -> ReaderT SqlBackend IO Jobs
 readAndParseConfigFile oid path p = do
     pcs <- liftIO $ parseConfigFile path
     if null pcs then update (entityKey p) [ProjectErrorMessage =. "Error in the config file"] >> return M.empty else do
         keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
-        return $ M.unions $ zipWith (createTemplateFromPlaybookConfiguration oid path) keys pcs
+        return $ M.unions $ zipWith (createJobsFromPlaybookConfiguration oid path) keys pcs
 
 -- | Given an oid, path, a playbook kay and the parsed config, created an job-template
-createTemplateFromPlaybookConfiguration :: String -> String -> Key Playbook -> PlaybookConfiguration -> JobTemplates
-createTemplateFromPlaybookConfiguration oid path key p = M.singleton (pName p)
-    JobTemplate{_scheduleFormat=pSchedule p, _repoPath=path, _playbook=pFile p, _playbookId=key, _failCount=0, _systemJob=True, _repoIdentifier=oid}
+createJobsFromPlaybookConfiguration :: String -> String -> Key Playbook -> PlaybookConfiguration -> Jobs
+createJobsFromPlaybookConfiguration oid path key p = M.singleton (pName p)
+    Job{_timeDue=Nothing, _scheduleFormat=pSchedule p, _repoPath=path, _playbook=pFile p, _playbookId=key, _failCount=0, _systemJob=True, _repoIdentifier=oid}
 
 markProjectFailed :: Key Project -> String -> ReaderT SqlBackend IO ()
 markProjectFailed key e = update key [ProjectErrorMessage =. e]
@@ -202,16 +197,16 @@ getOidAfterAction retAction = getLastOid >>= \oid -> return $ (True,oid) <$ retA
 
 -- /JOB QUEUE/ --
 
-readJobQueueDatabase :: ReaderT SqlBackend IO JobTemplates
+readJobQueueDatabase :: ReaderT SqlBackend IO Jobs
 readJobQueueDatabase = do
     dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
-    let templs = map (\(_,x,y) -> createUserTemplate x y) dataJoin
+    let templs = map (\(_,x,y) -> createUserJobs x y) dataJoin
     mapM_ (delete . entityKey . fst3) dataJoin
     return $ M.fromList $ zip [schedulerUserTemplateKey ++ show n | n <- [0..]] templs
 
-createUserTemplate :: Entity Playbook -> Entity Project -> JobTemplate
-createUserTemplate play proj =
-    JobTemplate{_scheduleFormat=Now, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
+createUserJobs :: Entity Playbook -> Entity Project -> Job
+createUserJobs play proj =
+    Job{_timeDue=Nothing, _scheduleFormat=Now, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
                 _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=projectOid (entityVal proj)}
 
 -- | Assumes ssh format (e.g. @git@git.example.com:test/test-repo.git@) and return the path (e.g. @test/test-repo@)
