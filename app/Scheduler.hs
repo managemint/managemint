@@ -20,7 +20,7 @@ import ScheduleFormat
 import Config
 
 import Data.Char (isAlphaNum)
-import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
+import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime, addLocalTime)
 import Data.Time.Clock.Compat (getCurrentTime)
 import Data.List (sort, (\\), foldl', nub)
 import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton)
@@ -46,7 +46,6 @@ instance Ord Job where
 
 makeLenses ''Job
 makeLenses ''JobTemplate
-makeLensesFor [("localTimeOfDay", "localTimeOfDayL")] ''LocalTime
 
 schedule :: ConnectionPool -> IO ()
 schedule pool = runJobs pool M.empty
@@ -70,7 +69,7 @@ calculateNextInstance time (name,templ) = Job {_timeDue = nextInstance time (tem
 
 getDueJobs :: Jobs -> StateT JobTemplates IO Jobs
 getDueJobs jobs = do
-    time <- liftIO getTime
+    time <- liftIO getTime <&> addLocalTime 10
     return $ takeWhile (\j -> j^.timeDue <= time) (sort jobs)
 
 -- | Executes the jobs and removes the user jobs from the job templates
@@ -191,7 +190,8 @@ doPullPerhaps oid path branch = do
 
 -- | Recrates the folder, by removing it (if it existed) and cloning the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
-fillFolder path url branch = liftIO (removeDirectoryRecursive path) >> doClone url path branch >>= getOidAfterAction
+fillFolder path url branch = liftIO (removeDicIfExists path) >> doClone url path branch >>= getOidAfterAction
+    where removeDicIfExists path = doesDirectoryExist path >>= \b -> when b $ removeDirectoryRecursive path
 
 -- | Returns the oid after a pull or clone while respecting failures
 getOidAfterAction :: Either String () -> IO (Either String (Bool,String))
