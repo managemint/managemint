@@ -25,17 +25,17 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-PyObject *import_name(const char *modname, const char *symbol)
+PyObject *import_name(const char *_modname, const char *_symbol)
 {
 	PyObject *u_name, *module;
-	u_name = PyUnicode_FromString(modname);
+	u_name = PyUnicode_FromString(_modname);
 	module = PyImport_Import(u_name);
 	Py_DECREF(u_name);
 
 	if (!module)
 		return NULL;
 
-	return PyObject_GetAttrString(module, symbol);
+	return PyObject_GetAttrString(module, _symbol);
 }
 
 static void run_ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
@@ -95,6 +95,11 @@ static void run_ansible( char* _path, char *_playbook, char *_limit, char *_tag 
 	exit(ret);
 }
 
+/**
+ * We need this, because Py_Finalize() is appearantly buggy.
+ * Re-Running ansible causes weird Class inheritance errors.
+ * So we need a fork here.
+ */
 int ansible( char* _path, char *_playbook, char *_limit, char *_tag ) {
 	pid_t pid = fork();
 	int ret;
