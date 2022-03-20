@@ -38,6 +38,7 @@ import Database.Persist.TH
 import Control.Monad.Logger (runStderrLoggingT)
 import Control.Monad.Reader
 import Control.Monad.State
+import Control.Monad
 import Control.Concurrent.Async
 import Data.Maybe
 import Data.Foldable
@@ -277,26 +278,20 @@ getHomeR = do
                     <button>Add
         |])
 
+handleFormSuccess :: Monad m => FormResult x -> (x -> m a) -> m ()
+handleFormSuccess result f = case result of
+                                FormSuccess x -> Control.Monad.void $ f x
+                                _ -> return ()
+
 -- We handle the forms here in POST and then redirect over to GET. This allows refreshing without resending data
 postHomeR :: Handler Html
 postHomeR = do
     ((resultAddRepo, _), _) <- runFormPost $ identifyForm "addRepo" addRepoForm
-    case resultAddRepo of
-        FormSuccess (AddRepository repo branch) -> do
-            runDB ( insert $ Project (unpack repo) (unpack branch) "" "")
-            return ()
-        _ -> return ()
+    handleFormSuccess resultAddRepo (\(AddRepository repo branch) -> runDB ( insert $ Project (unpack repo) (unpack branch) "" ""))
     ((resultDeleteRepo, _), _) <- runFormPost $ identifyForm (pack "deleteRepo") $ buttonForm 0
-    case resultDeleteRepo of
-        FormSuccess (ButtonForm val) -> do
-            runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)])
-        _ -> return ()
+    handleFormSuccess resultDeleteRepo (\(ButtonForm val) -> runDB (deleteWhere [ProjectId ==. toSqlKey (fromIntegral val)]))
     ((resultRunPlaybook, _), enctype) <- runFormPost $ identifyForm (pack "runPlaybook") $ buttonForm 0
-    case resultRunPlaybook of
-        FormSuccess (ButtonForm val) -> do
-            runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" "")
-            return ()
-        _ -> return ()
+    handleFormSuccess resultDeleteRepo (\(ButtonForm val) -> runDB (insert $ JobQueue (toSqlKey (fromIntegral val)) "" ""))
     redirect HomeR
 
 getRunR :: Int -> Handler Html
