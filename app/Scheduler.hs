@@ -8,10 +8,9 @@
  -
  -}
 
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, OverloadedStrings, DeriveFunctor, GeneralizedNewtypeDeriving #-}
 
---module Scheduler (schedule) where
-module Scheduler where
+module Scheduler (schedule) where
 
 import DatabaseUtil
 import ProjectConfig
@@ -25,13 +24,15 @@ import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone
 import Data.Time.Clock.Compat (getCurrentTime)
 import Data.List ((\\), foldl')
 import Data.Maybe (isNothing)
+import Data.Text (pack, Text)
 import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton, keys, update)
 import Control.Lens ((^.), (%~), (%=), (<&>), (&), (?~), at, mapped, makeLenses, makeLensesFor)
 import Control.Lens.Combinators (filtered)
 import Control.Monad (when)
-import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM)
+import Control.Monad.State (StateT, gets, runStateT, liftIO, modify, filterM, MonadState, MonadIO, lift)
 import Control.Monad.Trans.Reader (ReaderT)
 import Control.Concurrent (threadDelay)
+import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, runStderrLoggingT, logInfoNS, logDebugNS)
 import Database.Persist.MySQL hiding (get)
 import System.Directory (listDirectory, removeDirectoryRecursive, doesDirectoryExist)
 
@@ -39,8 +40,12 @@ import System.Directory (listDirectory, removeDirectoryRecursive, doesDirectoryE
 data Job = Job {_timeDue :: Maybe LocalTime, _scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _playbookId :: PlaybookId, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
 type Jobs = M.Map String Job
 
+newtype JobEnv a = JobEnv { unEnv :: StateT Jobs (LoggingT IO) a }
+    deriving (Functor, Monad, MonadIO, Applicative, MonadState Jobs, MonadLogger)
+
 makeLenses ''Job
 
+-- TODO: make nicer
 instance Show Job where
     show j = j^.playbook ++ " at " ++ show (j^.timeDue)
 
@@ -50,7 +55,6 @@ instance Eq Job where
 instance Ord Job where
     compare j1 j2 = compare (j1^.timeDue) (j2^.timeDue)
 
-
 schedule :: ConnectionPool -> IO ()
 schedule pool = runJobs pool M.empty
 
@@ -58,41 +62,43 @@ schedule pool = runJobs pool M.empty
 runJobs :: ConnectionPool -> Jobs -> IO ()
 runJobs pool jobMap = do
     jobMap' <- runSqlPool (updateConfigRepoJobs jobMap >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
-    print $ "INFO: Got these jobs: " ++ show jobMap' -- TODO: Replace with logging
-    jobs <- snd <$> runStateT (getDueJobsCalculateTimestamp >>= executeJobs pool) jobMap'
+    jobs <- snd <$> runStderrLoggingT (runStateT (unEnv (getDueJobsCalculateTimestamp >>= executeJobs pool)) jobMap')
+    let jobs = jobMap'
     threadDelay 10000000
     runJobs pool jobs
 
 -- | Returns the jobs which are due and calculates the next timestamps
-getDueJobsCalculateTimestamp :: StateT Jobs IO Jobs
+getDueJobsCalculateTimestamp :: JobEnv Jobs
 getDueJobsCalculateTimestamp = do
     time <- liftIO getTime
     traverse . filtered (\j -> isNothing (j^.timeDue)) %= calAndInsertNextInstance time
     jobs <- gets (M.filter (\j -> maybe False (<= time) (j^.timeDue)))
+    logDebug $ "Due Jobs: " ++ show jobs
     modify $ flip (foldr (M.update (Just . calAndInsertNextInstance time))) (M.keys jobs)
     return jobs
         where calAndInsertNextInstance time j = j & timeDue ?~ nextInstance time (j^.scheduleFormat)
 
 -- | Executes the jobs and removes the user jobs from the job templates
-executeJobs :: ConnectionPool -> Jobs -> StateT Jobs IO ()
+executeJobs :: ConnectionPool -> Jobs -> JobEnv ()
 executeJobs pool jobs = do
-    liftIO $ print $ "INFO: I will execute the following jobs: " ++ show jobs -- TODO: Replace with logging
     mapM_ (executeJob pool) $ M.toList jobs
     modify $ M.filter (^. systemJob)
 
 -- | Executes a job and writes the run into the database
 -- If the job failed increases the failcount, else resets it
-executeJob :: ConnectionPool -> (String,Job) -> StateT Jobs IO ()
+executeJob :: ConnectionPool -> (String,Job) -> JobEnv ()
 executeJob pool (name,job) = do
-      time <- liftIO getTime
-      runKey <- liftIO $ addRun (Run (job^.playbookId)
-                                     1
-                                     (job^.repoIdentifier)
-                                     (job^.systemJob)
-                                     (takeWhile (/= '.') (show time))) pool
-      success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-      let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
-      at name %= ((mapped.failCount) %~ if success then const 0 else (+1))
+    time <- liftIO getTime
+    runKey <- liftIO $ addRun (Run (job^.playbookId)
+                                   1
+                                   (job^.repoIdentifier)
+                                   (job^.systemJob)
+                                   (takeWhile (/= '.') (show time))) pool
+    logInfo $ "Schedule job: `" ++ show job
+    success <- liftIO $ execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+    logInfo $ "Job '" ++ name ++ "' finished with status " ++ show success
+    let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
+    at name %= ((mapped.failCount) %~ if success then const 0 else (+1))
 
 
 -- /SYSTEM JOBS/ --
@@ -264,5 +270,11 @@ after x xs = case dropWhile (/= x) xs of
 
 fst3 :: (a,b,c) -> a
 fst3 (a,_,_) = a
+
+logInfo :: MonadLogger m => String -> m ()
+logInfo = logInfoNS "Scheduler" . pack
+
+logDebug :: MonadLogger m => String -> m ()
+logDebug = logDebugNS "Scheduler" . pack
 
 -- \MIC\ --
