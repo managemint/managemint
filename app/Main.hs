@@ -8,16 +8,31 @@
  -
  -}
 
-import Scheduler
-import Yesod
-import DatabaseUtil
-import Database.Persist
-import Database.Persist.MySQL
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT)
+import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration)
+
+import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT, filterLogger, LogSource, LogLevel)
 import Control.Monad (forever, when)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait, poll, Async)
+import Control.Monad.IO.Class (liftIO)
+
+import Data.Text (Text)
+
 import Webserver
+import Scheduler
+import Config
+import DatabaseUtil
+
+
+logFilterSource :: Text -> Bool
+logFilterSource = flip notElem mainLogSourcesBlocklist
+
+logFilterLevel :: LogLevel -> Bool
+logFilterLevel = (<=) mainLogLevel
+
+logFilter :: LogSource -> LogLevel -> Bool
+logFilter s l = logFilterLevel l && logFilterSource s
+
 
 checkThreadOk :: (Show a, Show b) => Maybe (Either a b) -> IO Bool
 checkThreadOk (Just (Left e)) = do
@@ -35,9 +50,10 @@ monitorStatus as = do
     threadDelay 1000000
     (mapM checkThreadOk =<< mapM poll as) >>= (`when` monitorStatus as) . and
 
+
 main :: IO ()
 main = do
-    runStderrLoggingT $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
+    runStderrLoggingT $ filterLogger logFilter $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
         runSqlPersistMPool (runMigration migrateAll) pool
         sched <- async $ schedule pool
         websv <- async $ runWebserver pool

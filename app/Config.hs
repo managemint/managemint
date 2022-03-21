@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {- app/Config.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -9,7 +10,13 @@
  -}
 
 module Config where
+import Control.Monad.Logger (LogLevel(..))
+import Data.Text (Text)
+
 -- Format: <module><Name>
+
+mainLogSourcesBlocklist = [ "SQL" ] :: [Text]
+mainLogLevel = LevelDebug
 
 sockReadLen = 2048 :: Int
 
