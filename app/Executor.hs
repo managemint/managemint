@@ -10,6 +10,8 @@
 
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 module Executor(AnsiblePlaybook(..), execPlaybook) where
 
 import Ansible
@@ -20,12 +22,14 @@ import DatabaseUtil
 import Foreign.C.Types
 import Foreign.C.String
 
-import Control.Concurrent.Async
+import Control.Concurrent.Async (async, poll, waitCatch)
 import Control.Monad
+import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, logInfoNS, logDebugNS)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Reader (ReaderT, runReaderT, ask)
+import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
 
 import Data.Maybe
+import Data.Text(pack, Text)
 
 import System.Posix.Env
 import System.Directory
@@ -104,41 +108,44 @@ newtype AnsibleEvent = AnsibleEvent
     { event :: String
     } deriving (Show, Data)
 
+data Callback = CallbackResult AnsibleRunnerResult
+              | CallbackStart AnsibleRunnerStart
+              | Callback AnsibleEvent
+              | CallbackOther
+
 -- TODO put in /run
 sockPath = executorSockPath
 
--- | Write Runner result to database
-writeResult :: AnsibleRunnerResult -> ReaderT (ConnectionPool, RunId, Socket) IO ()
-writeResult arr = do
+writeToDatabase :: Callback -> ReaderT (ConnectionPool, RunId, Socket) IO ()
+writeToDatabase (CallbackResult arr) = do
             (pool, rid, _) <- ask
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
                 (is_item arr) (item arr) "Output not implemented" ) pool
-
--- | handle runner start, unused
-writeStart :: AnsibleRunnerStart -> ReaderT (ConnectionPool, RunId, Socket) IO ()
-writeStart ars = return ()
+writeToDatabase _ = return ()
 
 -- | Determine, which callback event was recieved
-processAnsibleEvent :: String -> String -> ReaderT (ConnectionPool, RunId, Socket) IO ()
+processAnsibleEvent :: String -> String -> Callback
 processAnsibleEvent e s = case e of
-        "task_runner_result" -> writeResult (decodeJSON s :: AnsibleRunnerResult)
-        "task_runner_start"  -> writeStart  (decodeJSON s :: AnsibleRunnerStart)
-        _ -> return ()
+        "task_runner_result" -> CallbackResult (decodeJSON s :: AnsibleRunnerResult)
+        "task_runner_start"  -> CallbackOther-- CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
+        _ -> CallbackOther
 
 processAnsibleCallbacks :: ReaderT (ConnectionPool, RunId, Socket) IO ()
 processAnsibleCallbacks = forever $ do
     (_, _, sock) <- ask
 
     callbackRaw <- liftIO $ readSocket sock
-    processAnsibleEvent (event (decodeJSON callbackRaw :: AnsibleEvent)) callbackRaw
+    writeToDatabase $ processAnsibleEvent (event (decodeJSON callbackRaw :: AnsibleEvent)) callbackRaw
 
 -- | execute Ansible Playbook defined by AnsiblePlaybook type,
 -- write results to database set by pool under RunID rid
 -- Return: True if run was OK, False otherwise
-execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> IO Bool
+execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) Bool
 execPlaybook pool rid pb = do
+    logInfo "OwO"
+    liftIO $ do
         putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
         sock <- createBindSocket sockPath
 
@@ -153,3 +160,9 @@ execPlaybook pool rid pb = do
         removeFile sockPath
 
         return $ ret==0
+
+logInfo :: MonadLogger m => String -> m ()
+logInfo = logInfoNS "Executor" . pack
+
+logDebug :: MonadLogger m => String -> m ()
+logDebug = logDebugNS "Executor" . pack
