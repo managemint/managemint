@@ -63,7 +63,6 @@ runJobs :: ConnectionPool -> Jobs -> IO ()
 runJobs pool jobMap = do
     jobMap' <- runSqlPool (updateConfigRepoJobs jobMap >>= (\u -> M.union u <$> readJobQueueDatabase)) pool --Have different timing for the two updates
     jobs <- snd <$> runStderrLoggingT (runStateT (unEnv (getDueJobsCalculateTimestamp >>= executeJobs pool)) jobMap')
-    let jobs = jobMap'
     threadDelay 10000000
     runJobs pool jobs
 
@@ -95,9 +94,8 @@ executeJob pool (name,job) = do
                                    (job^.systemJob)
                                    (takeWhile (/= '.') (show time))) pool
     logInfo $ "Schedule job: `" ++ show job
-    success_ <- JobEnv . lift $
+    success <- fmap (ExecutorNoErr ==) $ JobEnv . lift $
         execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-    let success = success_ == ExecutorNoErr -- TODO remove Jony's pfusch
     logInfo $ "Job '" ++ name ++ "' finished with status " ++ show success
     let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
     at name %= ((mapped.failCount) %~ if success then const 0 else (+1))
@@ -213,7 +211,7 @@ readJobQueueDatabase = do
     dataJoin <- joinJobQueuePlaybookProject >>= removeIllegalJobs
     let templs = map (\(_,x,y) -> createUserJobs x y) dataJoin
     mapM_ (delete . entityKey . fst3) dataJoin
-    return $ M.fromList $ zip [schedulerUserTemplateKey ++ show n | n <- [0..]] templs
+    return $ M.fromList $ zip [show n ++ schedulerUserTemplateKey | n <- [0..]] templs
 
 createUserJobs :: Entity Playbook -> Entity Project -> Job
 createUserJobs play proj =
