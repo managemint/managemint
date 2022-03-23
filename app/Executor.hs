@@ -22,14 +22,21 @@ import DatabaseUtil
 import Foreign.C.Types
 import Foreign.C.String
 
-import Control.Concurrent.Async (async, poll, waitCatch)
-import Control.Monad
-import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, logInfoNS, logDebugNS)
+import Control.Concurrent.Async (async, poll, waitCatch, wait)
+import Control.Concurrent (threadDelay)
+
+import Control.Monad (when, unless, void)
+import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, logInfoNS, logDebugNS, logWarnNS)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
+import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify)
+
+import Control.Lens.Operators ((.=))
+import Control.Lens.Combinators (_4)
 
 import Data.Maybe
 import Data.Text(pack, Text)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef, modifyIORef)
 
 import System.Posix.Env
 import System.Directory
@@ -40,8 +47,9 @@ import Text.Printf
 
 import Network.Socket (Socket)
 
-import Database.Persist.MySQL
-import Database.Persist
+import Database.Persist.MySQL (ConnectionPool)
+
+import GHC.IO.Handle (Handle)
 
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html#t:JSON
 -- https://hackage.haskell.org/package/json-0.10/docs/Text-JSON.html
@@ -52,7 +60,10 @@ data AnsiblePlaybook = AnsiblePlaybook
     , playbookName :: String
     , executeTags :: String
     , targetLimit :: String
-    } deriving (Show, Data)
+    } deriving (Data)
+
+instance Show AnsiblePlaybook where
+    show p = "Playbook :: path: " ++ executionPath p ++ " playbook: " ++ playbookName p
 
 data AnsibleRunnerStart = AnsibleRunnerStart
     { playbook :: String
@@ -111,58 +122,87 @@ newtype AnsibleEvent = AnsibleEvent
 data Callback = CallbackResult AnsibleRunnerResult
               | CallbackStart AnsibleRunnerStart
               | Callback AnsibleEvent
+              | CallbackEnd
               | CallbackOther
 
--- TODO put in /run
-sockPath = executorSockPath
+type ExecutorMT = StateT (ConnectionPool, RunId, Handle, Bool)
 
-writeToDatabase :: Callback -> ReaderT (ConnectionPool, RunId, Socket) IO ()
-writeToDatabase (CallbackResult arr) = do
-            (pool, rid, _) <- ask
+-- | Determine, which callback event was recieved, Decode the string
+processAnsibleEvent :: String -> String -> Callback
+processAnsibleEvent e s = case e of
+        "task_runner_result" -> CallbackResult (decodeJSON s :: AnsibleRunnerResult)
+        "task_runner_start"  -> CallbackOther -- CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
+        "end"                -> CallbackEnd
+        _                    -> CallbackOther
+
+handleCallback :: Callback -> ExecutorMT IO ()
+handleCallback (CallbackResult arr) = do
+            (pool, rid, _, _) <- get
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
                 (is_item arr) (item arr) "Output not implemented" ) pool
-writeToDatabase _ = return ()
+handleCallback CallbackEnd = _4 .= True
+handleCallback _ = return ()
 
--- | Determine, which callback event was recieved
-processAnsibleEvent :: String -> String -> Callback
-processAnsibleEvent e s = case e of
-        "task_runner_result" -> CallbackResult (decodeJSON s :: AnsibleRunnerResult)
-        "task_runner_start"  -> CallbackOther-- CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
-        _ -> CallbackOther
+processAnsibleCallbacks :: IORef Bool -> ExecutorMT IO Bool
+processAnsibleCallbacks iorb = do
+    liftIO $ threadDelay 10000
+    (_, _, handle, _) <- get
 
-processAnsibleCallbacks :: ReaderT (ConnectionPool, RunId, Socket) IO ()
-processAnsibleCallbacks = forever $ do
-    (_, _, sock) <- ask
+    callbackRaw <- liftIO $ maybeReadHandle handle
+    case callbackRaw of
+      (Just s) -> do
+          handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s
+      Nothing  -> return ()
 
-    callbackRaw <- liftIO $ readSocket sock
-    writeToDatabase $ processAnsibleEvent (event (decodeJSON callbackRaw :: AnsibleEvent)) callbackRaw
+    continue <- liftIO $ readIORef iorb
+    if continue
+      then processAnsibleCallbacks iorb
+      else do
+        (_, _, _, ret) <- get
+        return ret
 
 -- | execute Ansible Playbook defined by AnsiblePlaybook type,
 -- write results to database set by pool under RunID rid
 -- Return: True if run was OK, False otherwise
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) Bool
 execPlaybook pool rid pb = do
-    logInfo "OwO"
-    liftIO $ do
-        putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ sockPath
-        sock <- createBindSocket sockPath
+    logInfo $ "Executing " ++ show pb
 
-        cb  <- async $ runReaderT processAnsibleCallbacks (pool, rid, sock)
-        ret <- ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
+    liftIO $ putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ executorSockPath
+    handle <- liftIO $ handleFromSocket =<< createBindSocket executorSockPath
 
-        closeSocket sock
-        -- We want to catch the "Bad File descriptor" of the previously
-        -- closed socket
-        poll cb >>= \x -> when (isNothing x) $ void(waitCatch cb)
+    continue <- liftIO $ newIORef True
+    cb  <- liftIO $ async $ runStateT (processAnsibleCallbacks continue) (pool, rid, handle, False)
 
-        removeFile sockPath
+    logDebug "Spawned async callback processor. Now running Ansible"
+    ret <- liftIO $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
 
-        return $ ret==0
+    logDebug $ "Ansible returned with " ++ show ret ++ ". Waiting a bit for all data to arrive..."
+
+    -- Wait for all data to arrive at socket
+    liftIO $ threadDelay 1000000
+    logDebug "Trying to stop callback processor"
+    liftIO $ writeIORef continue False
+
+    -- TODO Check return of StateT??
+    (hasEnded, _) <- liftIO $ wait cb
+    logDebug "Callback processor stopped"
+    unless hasEnded $ logWarn "No Stats-Callback was recieved. Ansible did NOT terminate gracefully."
+
+    liftIO $ closeHandle handle
+    liftIO $ removeFile executorSockPath
+
+    logInfo "Executor finished gracefully."
+
+    return $ ret==0
 
 logInfo :: MonadLogger m => String -> m ()
 logInfo = logInfoNS "Executor" . pack
 
 logDebug :: MonadLogger m => String -> m ()
 logDebug = logDebugNS "Executor" . pack
+
+logWarn :: MonadLogger m => String -> m ()
+logWarn = logWarnNS "Executor" . pack

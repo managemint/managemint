@@ -10,11 +10,17 @@
 
 module Sock where
 import Config
-import Control.Monad (forever)
 
-import Network.Socket
+import Control.Monad (forever, when)
+
+import Network.Socket (Socket, socket, bind, close, Family(..), SocketType(..), SockAddr(..), socketToHandle)
 import Network.Socket.ByteString (recv)
-import Data.ByteString.Internal
+
+import Data.ByteString.Internal (unpackChars)
+import Data.ByteString (hGetNonBlocking, empty, null)
+
+import GHC.IO.Handle (Handle, hClose)
+import System.IO (IOMode(..))
 
 -- | Length to read from Socket
 readLen :: Int
@@ -26,6 +32,20 @@ createBindSocket s = do
         sock <- socket AF_UNIX Datagram 0
         bind sock $ SockAddrUnix s
         return sock
+
+handleFromSocket :: Socket -> IO Handle
+handleFromSocket = flip socketToHandle ReadWriteMode
+
+maybeReadHandle :: Handle -> IO (Maybe String)
+maybeReadHandle h = do
+    bs <- hGetNonBlocking h readLen
+
+    if bs == empty
+       then return Nothing
+       else return $ Just $ unpackChars bs
+
+closeHandle :: Handle -> IO()
+closeHandle = hClose
 
 closeSocket :: Socket -> IO()
 closeSocket = close
