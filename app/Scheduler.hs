@@ -24,21 +24,52 @@ import Config
 import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
 import Data.Time.Clock.Compat (getCurrentTime)
-import Data.List ((\\), foldl')
+import Data.List ((\\), foldl', isPrefixOf)
 import Data.Text (pack, Text, intercalate)
 import qualified Data.Map as M (Map, empty, filter, toList, union, unions, delete, fromList, singleton)
-import Control.Lens((^.),(%~),(%=),(<&>),(&),(.~),(.=),_1,_Right,view,at,mapped,makeLenses,makeLensesFor)
+import Control.Lens
+    ( (^.)
+    , (%~)
+    , (%=)
+    , (<&>)
+    , (&)
+    , (.~)
+    , (.=)
+    , (^..)
+    , _1
+    , _Right
+    , view
+    , at
+    , mapped
+    , makeLenses
+    , makeLensesFor
+    , itoList)
 import Control.Lens.Combinators (filtered)
-import Control.Monad (when, filterM, unless )
+import Control.Monad (when, filterM, unless)
 import Control.Monad.Trans.Reader (ReaderT)
 import Control.Monad.RWS (RWST, execRWST, ask, liftIO, lift, get, gets, modify)
 import Control.Concurrent (threadDelay)
 import Control.Monad.Logger (MonadLogger, LoggingT, runStderrLoggingT, logInfoNS, logDebugNS)
-import Database.Persist.MySQL hiding (get)
+import Database.Persist.MySQL 
+    ( ConnectionPool
+    , Entity (entityVal, entityKey)
+    , SqlBackend
+    , PersistStoreWrite (insert, update, delete)
+    , (=.)
+    , selectList
+    , fromSqlKey
+    , SelectOpt (Asc)
+    , runSqlPool)
 import System.Directory (listDirectory, removeDirectoryRecursive, doesDirectoryExist)
 
--- TODO: Implement prettier instance of Show
-data Job = Job {_timeDue :: LocalTime, _scheduleFormat :: Schedule, _repoPath :: String, _playbook :: String, _playbookId :: PlaybookId, _failCount :: Int, _systemJob :: Bool, _repoIdentifier :: String}
+data Job = Job { _timeDue :: LocalTime
+               , _scheduleFormat :: Schedule
+               , _repoPath :: String
+               , _playbook :: String
+               , _playbookId :: PlaybookId
+               , _failCount :: Int
+               , _systemJob :: Bool
+               , _repoIdentifier :: String}
 -- The key is the project path (git project name plus databse id) plus the playbook
 type Jobs = M.Map String Job
 -- TODO: We probably don't want to use monad logger, and instead use the writer in the RWST stack
@@ -94,12 +125,12 @@ executeJob (name,job) = do
                                    (job^.repoIdentifier)
                                    (job^.systemJob)
                                    (takeWhile (/= '.') (show time))
-    logInfo $ "Schedule job: `" <> showJobsT (M.singleton name job)
+    logInfo $ "Schedule job: " <> showJobsT (M.singleton name job)
     success <- fmap (ExecutorNoErr ==) $ lift $
         execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-    logInfo $ "Job '" <> pack name <> "' finished with status " <> showT success
+    logInfo $ "Job '" <> pack name <> "' finished with status " <> if success then "SUCCESS" else "FAILED"
     let status = if success then 0 else -1 in lift' $ update runKey [RunStatus =. status]
-    at name %= ((mapped.failCount) %~ if success then const 0 else (+1))
+    at name %= (mapped.failCount %~ if success then const 0 else (+1))
 
 
 -- /SYSTEM JOBS/ --
@@ -124,27 +155,31 @@ updateConfigRepoJobs = do
     mapM_ updateSystemJobs projects
     get >>= logDebug . mappend "System jobs: ". showJobsT
 
--- | When a project is deleted in the database remove the folder and it's jobs
+-- | When a project is deleted in the database remove the folder and its jobs
 cleanupFoldersAndJobs :: [Entity Project] -> JobEnv ()
 cleanupFoldersAndJobs projects = do
     existingFolders <- liftIO $ listDirectory schedulerRepoRoot >>= filterM doesDirectoryExist
     let remove = existingFolders \\ (map projectToPath projects ++ schedulerFolders)
-    liftIO $ mapM_ removeDirectoryRecursive remove
-    unless (null remove) $ logDebug ("I removed these folders: " <> showT remove)
-    modify $ \j -> foldl' (flip M.delete) j remove
+    unless (null remove) $ do
+        liftIO $ mapM_ removeDirectoryRecursive remove
+        logDebug ("I removed these folders: " <> showT remove)
+        -- TODO: This should be possible without converting the map to a list (ifiltered?)
+        modify $ M.fromList . concat . \jobs -> map ( \path ->
+            itoList jobs^..traverse.filtered (\(key,_) -> not $ path `isPrefixOf` key) ) remove
 
 -- | Updates the system jobs if the repo changed or doesn't locally exist, else leaves them unchanged
 updateSystemJobs :: Entity Project -> JobEnv ()
 updateSystemJobs project = do
     let oid = projectOid $ entityVal project
     jobsNull <- gets null
-    ret <- liftIO $ getRepo oid path url branch <&> (& (_Right._1.filtered (const jobsNull)) .~ True)
+    ret <- liftIO $ getRepo oid path url branch <&> (& _Right._1.filtered (const jobsNull) .~ True)
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e
       Right (change,oid) -> do
         lift' $ update (entityKey project) [ProjectErrorMessage =. "", ProjectOid =. oid]
-        when change $ do
-            readAndParseConfigFile oid path project
+        when change $
+            logInfo ("The repo " <> showT url <> " changed, so I updated it's jobs")
+                >> readAndParseConfigFile oid path project
     where
         url = projectUrl $ entityVal project
         path = projectToPath project
@@ -155,7 +190,7 @@ getJobsFromProject jobs project = M.filter (\t -> t^.repoPath == path) jobs
     where path = projectToPath project
 
 -- | Tries to parse the config file in the folder pointed to by path.
--- Writes the parse status and the playbooks specified in the config file in the database and creates the jobs
+-- Writes the parse status and the playbooks specified in the config file in the database and creates/updates the jobs
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> JobEnv ()
 readAndParseConfigFile oid path p = do
     pcs <- liftIO $ parseConfigFile path
@@ -194,8 +229,7 @@ doPullPerhaps oid path branch = do
       Left err -> return $ Left err
       Right () -> do
           oidNew <- getLastOid
-          return $ Right $ if oidNew == oid then (False, oid)
-                                            else (True, oidNew)
+          return $ Right (oid /= oidNew, oidNew)
 
 -- | Recrates the folder, by removing it (if it existed) and cloning the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
