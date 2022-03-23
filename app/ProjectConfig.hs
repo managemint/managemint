@@ -1,6 +1,8 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -18,12 +20,10 @@ import ScheduleFormat
 import Parser
 import TomlishParser
 
-import qualified Data.Map as M
-import Database.Persist.MySQL hiding (get)
-import Control.Monad.Trans.Reader (ReaderT)
-import System.IO (readFile)
+import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
 import Data.Maybe (mapMaybe)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.RWS (ask)
 import Control.Exception (try)
 
 data PlaybookConfiguration = PlaybookConfiguration
@@ -51,9 +51,10 @@ parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
       Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
 parseTomlishTree _ = Nothing
 
-writePlaybookInDatabase :: Key Project -> PlaybookConfiguration -> ReaderT SqlBackend IO (Key Playbook)
 writePlaybookInDatabase key p = do
-    playbooks <- getPlaybooks key
-    case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
-      []     -> insert $ Playbook key (pFile p) (pName p)
-      (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
+    pool <- ask
+    liftIO $ flip runSqlPool pool $ do
+      playbooks <- getPlaybooks key
+      case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
+        []     -> insert $ Playbook key (pFile p) (pName p)
+        (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
