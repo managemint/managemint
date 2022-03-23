@@ -26,8 +26,9 @@ import Control.Concurrent.Async (async, poll, waitCatch, wait)
 import Control.Concurrent (threadDelay)
 
 import Control.Monad (when, unless, void)
-import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, logInfoNS, logDebugNS, logWarnNS)
+import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, runStderrLoggingT, logInfoNS, logDebugNS, logWarnNS)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
 import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify, gets)
 
@@ -140,9 +141,10 @@ processAnsibleEvent e s = case e of
         "end"                -> CallbackEnd
         _                    -> CallbackOther
 
-handleCallback :: Callback -> ExecutorMT IO ()
+handleCallback :: Callback -> ExecutorMT (LoggingT IO) ()
 handleCallback (CallbackResult arr) = do
             (pool, rid, _, _) <- get
+            logDebug $ "Callback status for '" ++ taskARR arr ++ "' on '" ++ hostARR arr ++ "'"
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
@@ -150,13 +152,14 @@ handleCallback (CallbackResult arr) = do
 handleCallback CallbackEnd = _4 .= True
 handleCallback _ = return ()
 
-processAnsibleCallbacks :: IORef Bool -> ExecutorMT IO Bool
+-- | Try to process Ansible callbacks as long as iorb is true
+processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) Bool
 processAnsibleCallbacks iorb = do
     liftIO $ threadDelay 10000
     (_, _, handle, _) <- get
 
     maybe
-        (return ())
+        (return ()) -- No Data was recieved
         (\s -> handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s)
         =<< liftIO (maybeReadHandle handle)
 
@@ -175,13 +178,13 @@ determineExecutorStatus _ _     = ExecutorExternalError
 -- Return: True if run was OK, False otherwise
 execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) ExecutorStatus
 execPlaybook pool rid pb = do
-    logInfo $ "Executing " ++ show pb
+    logInfo $ "RUN #" ++ show (keyToInt rid) ++ ": Executing " ++ show pb
 
     liftIO $ putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ executorSockPath
     handle <- liftIO $ handleFromSocket =<< createBindSocket executorSockPath
 
     continue <- liftIO $ newIORef True
-    cb  <- liftIO $ async $ runStateT (processAnsibleCallbacks continue) (pool, rid, handle, False)
+    cb  <- liftIO $ async $ runStderrLoggingT $ runStateT (processAnsibleCallbacks continue) (pool, rid, handle, False)
 
     logDebug "Spawned async callback processor. Now running Ansible"
     ret <- liftIO $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)

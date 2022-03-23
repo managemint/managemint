@@ -30,6 +30,8 @@ import Database.Persist.TH
 import Control.Monad.Trans.Reader
 import Yesod.Static
 
+import GHC.Int (Int64)
+
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Project
     url String
@@ -67,6 +69,9 @@ JobQueue
     arguments String
     triggerDate String
 |]
+
+keyToInt :: RunId -> Int64
+keyToInt = unSqlBackendKey . unRunKey
 
 getProjects :: ReaderT SqlBackend IO [Entity Project]
 getProjects = selectList [] [Asc ProjectId]
