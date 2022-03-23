@@ -29,10 +29,10 @@ import Control.Monad (when, unless, void)
 import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, logInfoNS, logDebugNS, logWarnNS)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
-import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify)
+import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify, gets)
 
 import Control.Lens.Operators ((.=))
-import Control.Lens.Combinators (_4)
+import Control.Lens.Combinators (_3, _4)
 
 import Data.Maybe
 import Data.Text(pack, Text)
@@ -155,18 +155,15 @@ processAnsibleCallbacks iorb = do
     liftIO $ threadDelay 10000
     (_, _, handle, _) <- get
 
-    callbackRaw <- liftIO $ maybeReadHandle handle
-    case callbackRaw of
-      (Just s) -> do
-          handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s
-      Nothing  -> return ()
+    maybe
+        (return ())
+        (\s -> handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s)
+        =<< liftIO (maybeReadHandle handle)
 
-    continue <- liftIO $ readIORef iorb
-    if continue
-      then processAnsibleCallbacks iorb
-      else do
-        (_, _, _, ret) <- get
-        return ret
+    liftIO (readIORef iorb) >>=
+        \b -> if b
+          then processAnsibleCallbacks iorb
+          else gets $ \(_, _, _, a) -> a
 
 determineExecutorStatus :: Int -> Bool -> ExecutorStatus
 determineExecutorStatus 0 False = ExecutorInternalError
