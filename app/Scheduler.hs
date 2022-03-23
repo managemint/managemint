@@ -95,8 +95,9 @@ executeJob pool (name,job) = do
                                    (job^.systemJob)
                                    (takeWhile (/= '.') (show time))) pool
     logInfo $ "Schedule job: `" ++ show job
-    success <- JobEnv . lift $
+    success_ <- JobEnv . lift $
         execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
+    let success = success_ == ExecutorNoErr -- TODO remove Jony's pfusch
     logInfo $ "Job '" ++ name ++ "' finished with status " ++ show success
     let status = if success then 0 else -1 in liftIO $ runSqlPool (update runKey [RunStatus =. status]) pool
     at name %= ((mapped.failCount) %~ if success then const 0 else (+1))

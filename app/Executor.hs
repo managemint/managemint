@@ -12,7 +12,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Executor(AnsiblePlaybook(..), execPlaybook) where
+module Executor(AnsiblePlaybook(..), ExecutorStatus(..), execPlaybook) where
 
 import Ansible
 import Sock
@@ -61,6 +61,11 @@ data AnsiblePlaybook = AnsiblePlaybook
     , executeTags :: String
     , targetLimit :: String
     } deriving (Data)
+
+data ExecutorStatus = ExecutorNoErr
+                    | ExecutorInternalError
+                    | ExecutorExternalError
+                    deriving(Show, Eq)
 
 instance Show AnsiblePlaybook where
     show p = "Playbook :: path: " ++ executionPath p ++ " playbook: " ++ playbookName p
@@ -163,10 +168,15 @@ processAnsibleCallbacks iorb = do
         (_, _, _, ret) <- get
         return ret
 
+determineExecutorStatus :: Int -> Bool -> ExecutorStatus
+determineExecutorStatus 0 False = ExecutorInternalError
+determineExecutorStatus 0 True  = ExecutorNoErr
+determineExecutorStatus _ _     = ExecutorExternalError
+
 -- | execute Ansible Playbook defined by AnsiblePlaybook type,
 -- write results to database set by pool under RunID rid
 -- Return: True if run was OK, False otherwise
-execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) Bool
+execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) ExecutorStatus
 execPlaybook pool rid pb = do
     logInfo $ "Executing " ++ show pb
 
@@ -195,8 +205,8 @@ execPlaybook pool rid pb = do
     liftIO $ removeFile executorSockPath
 
     logInfo "Executor finished gracefully."
+    return $ determineExecutorStatus ret hasEnded
 
-    return $ ret==0
 
 logInfo :: MonadLogger m => String -> m ()
 logInfo = logInfoNS "Executor" . pack
