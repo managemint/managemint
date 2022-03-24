@@ -5,5 +5,5 @@ dist-newstyle/
 *~
 hie.yaml
 client_session_key.aes
-ansible-example*/
+REPO*/
 *.swp

@@ -10,7 +10,7 @@
 
 import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration)
 
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT, filterLogger, LogSource, LogLevel)
+import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT, filterLogger, LogSource, LogLevel, askLoggerIO, runLoggingT)
 import Control.Monad (forever, when)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait, poll, Async)
@@ -53,9 +53,11 @@ monitorStatus as = do
 
 main :: IO ()
 main = do
-    runStderrLoggingT $ filterLogger logFilter $ withMySQLPool connectionInfo 10 $ \pool -> liftIO $ do
-        runSqlPersistMPool (runMigration migrateAll) pool
-        sched <- async $ schedule pool
-        websv <- async $ runWebserver pool
+    runStderrLoggingT $ filterLogger logFilter $ withMySQLPool connectionInfo 10 $ \pool -> do
+        logger <- askLoggerIO
+        liftIO $ do
+            runSqlPersistMPool (runMigration migrateAll) pool
+            sched <- async $ runLoggingT (schedule pool) logger
+            websv <- async $ runWebserver pool
 
-        monitorStatus [sched, websv]
+            monitorStatus [sched, websv]
