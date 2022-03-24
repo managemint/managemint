@@ -10,8 +10,7 @@
 
 import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration)
 
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT, filterLogger, LogSource, LogLevel, askLoggerIO, runLoggingT)
-import Control.Monad (forever, when)
+import Control.Monad (when)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait, poll, Async)
 import Control.Monad.IO.Class (liftIO)
