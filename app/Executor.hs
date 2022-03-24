@@ -27,11 +27,6 @@ import Control.Concurrent.Async (async, poll, waitCatch, wait)
 import Control.Concurrent (threadDelay)
 
 import Control.Monad (when, unless, void)
-import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, runStderrLoggingT, logInfoNS, logDebugNS, logWarnNS, askLoggerIO)
---import Control.Monad.IO.Class (liftIO)
---import Control.Monad.Trans.Class (lift)
---import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
---import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify, gets)
 import Control.Monad.RWS (RWST, execRWST, ask, liftIO, lift, get, gets, modify, put)
 
 import Control.Lens.Operators ((.=))

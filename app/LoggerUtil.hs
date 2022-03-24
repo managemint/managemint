@@ -16,6 +16,7 @@ module LoggerUtil( runHansibleLogger
                  , asyncWithLogger
                  , hLogDebug, hLogInfo, hLogWarn, hLogError
                  , LoggingT
+                 , MonadLogger
                  ) where
 
 import Config
