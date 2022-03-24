@@ -8,7 +8,8 @@
  -
  -}
 
-{-# LANGUAGE TemplateHaskell, OverloadedStrings, DeriveFunctor, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings  #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -50,7 +51,7 @@ import Control.Monad.Trans.Reader (ReaderT)
 import Control.Monad.RWS (RWST, execRWST, ask, liftIO, lift, get, gets, modify)
 import Control.Concurrent (threadDelay)
 import Control.Monad.Logger (MonadLogger, LoggingT, runStderrLoggingT, logInfoNS, logDebugNS)
-import Database.Persist.MySQL 
+import Database.Persist.MySQL
     ( ConnectionPool
     , Entity (entityVal, entityKey)
     , SqlBackend
@@ -87,7 +88,7 @@ showJobsT :: Jobs -> Text
 showJobsT = intercalate ", " . map (\(k,v) -> showT k <> " at " <> showJob v) . M.toList
     where showJob j = pack $ takeWhile (/= '.') $ show (j^.timeDue)
 
-schedule :: ConnectionPool -> (LoggingT IO) ()
+schedule :: ConnectionPool -> LoggingT IO ()
 schedule pool = runJobs pool M.empty
 
 -- | Given a list of jobs, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
@@ -126,11 +127,16 @@ executeJob (name,job) = do
                                    (job^.systemJob)
                                    (takeWhile (/= '.') (show time))
     logInfo $ "Schedule job: " <> showJobsT (M.singleton name job)
-    success <- fmap (ExecutorNoErr ==) $ lift $
-        execPlaybook pool runKey AnsiblePlaybook{executionPath=job^.repoPath, playbookName=job^.playbook, executeTags="", targetLimit=""} -- TODO: Add support for tags and limit when Executor has it
-    logInfo $ "Job '" <> pack name <> "' finished with status " <> if success then "SUCCESS" else "FAILED"
-    let status = if success then 0 else -1 in lift' $ update runKey [RunStatus =. status]
-    at name %= (mapped.failCount %~ if success then const 0 else (+1))
+    success <- lift $ execPlaybook pool runKey
+                -- TODO: Add support for tags and limit when Executor has it
+                AnsiblePlaybook { executionPath=job^.repoPath
+                                , playbookName=job^.playbook
+                                , executeTags=""
+                                , targetLimit=""}
+    logInfo $ "Job '" <> pack name <> "' finished with status " <> showT success
+    let (status, modifyFail) = if success == ExecutorNoErr then (0, const 0) else (-1, (+1))
+        in lift' (update runKey [RunStatus =. status])
+        >> at name %= (mapped.failCount %~ modifyFail)
 
 
 -- /SYSTEM JOBS/ --
@@ -199,14 +205,14 @@ readAndParseConfigFile oid path p = do
 -- | Given an oid, path, a playbook kay and the parsed config, created a job
 createJobsFromPlaybookConfiguration :: LocalTime -> String -> String -> (Key Playbook, PlaybookConfiguration) -> (String,Job)
 createJobsFromPlaybookConfiguration time oid path (key, p) =
-    (path ++ pName p, Job { _timeDue=nextInstance time (pSchedule p)
-                          , _scheduleFormat=pSchedule p
-                          , _repoPath=path
-                          , _playbook=pFile p
-                          , _playbookId=key
-                          , _failCount=0
-                          , _systemJob=True
-                          , _repoIdentifier=oid})
+    (path ++ '-' : pName p, Job { _timeDue=nextInstance time (pSchedule p)
+                                , _scheduleFormat=pSchedule p
+                                , _repoPath=path
+                                , _playbook=pFile p
+                                , _playbookId=key
+                                , _failCount=0
+                                , _systemJob=True
+                                , _repoIdentifier=oid})
 
 markProjectFailed :: Key Project -> String -> JobEnv ()
 markProjectFailed key e = lift' $ update key [ProjectErrorMessage =. e]
@@ -269,17 +275,7 @@ createUserJobs time play proj =
 -- | Assumes ssh format (e.g. @git@git.example.com:test/test-repo.git@) and return the path (e.g. @test/test-repo@)
 -- or an empty string on failure
 projectToPath :: Entity Project -> FilePath
-projectToPath p = let path = removeGitSuffix (after '/' (projectUrl (entityVal p))) ++ show (fromSqlKey (entityKey p))
-                  in if validRepoName path then path else ""
-    where
-        removeGitSuffix = reverse . after '.' . reverse
-
--- | Tests if a string is a valid repo name. A repository name should contain only alphanumeric,
--- dash (@'-'@), underscore (@'_'@) and dot (@'.'@) characters, but should not be euqal to @..@.
-validRepoName :: String -> Bool
-validRepoName ".." = False
-validRepoName s    = all chech s
-    where chech c = isAlphaNum c || c `elem` ['-','_','.']
+projectToPath p = "REPO" ++ show (fromSqlKey (entityKey p))
 
 getDatabaseJobQueue :: ReaderT SqlBackend IO [Entity JobQueue]
 getDatabaseJobQueue = selectList [] [Asc JobQueueId]

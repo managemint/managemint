@@ -21,7 +21,7 @@ mainLogLevel = LevelDebug
 sockReadLen = 2048 :: Int
 
 schedulerFailMax = 3 :: Int
-schedulerUserTemplateKey = "!USERTEMPLATE!"
+schedulerUserTemplateKey = "USERTEMPLATE"
 schedulerFolders = ["app",".stack-work","venv","csrc",".git","static"] -- TODO: Remove this as soon as the repos live in their own folder
 schedulerRepoRoot = "." :: FilePath
 
