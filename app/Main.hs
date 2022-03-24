@@ -10,8 +10,7 @@
 
 import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration)
 
-import Control.Monad.Logger (runStderrLoggingT, runNoLoggingT, filterLogger, LogSource, LogLevel, askLoggerIO, runLoggingT)
-import Control.Monad (forever, when)
+import Control.Monad (when)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, wait, poll, Async)
 import Control.Monad.IO.Class (liftIO)
@@ -22,17 +21,7 @@ import Webserver
 import Scheduler
 import Config
 import DatabaseUtil
-
-
-logFilterSource :: Text -> Bool
-logFilterSource = flip notElem mainLogSourcesBlocklist
-
-logFilterLevel :: LogLevel -> Bool
-logFilterLevel = (<=) mainLogLevel
-
-logFilter :: LogSource -> LogLevel -> Bool
-logFilter s l = logFilterLevel l && logFilterSource s
-
+import LoggerUtil
 
 checkThreadOk :: (Show a, Show b) => Maybe (Either a b) -> IO Bool
 checkThreadOk (Just (Left e)) = do
@@ -53,11 +42,11 @@ monitorStatus as = do
 
 main :: IO ()
 main = do
-    runStderrLoggingT $ filterLogger logFilter $ withMySQLPool connectionInfo 10 $ \pool -> do
-        logger <- askLoggerIO
+    runHansibleLogger $ withMySQLPool connectionInfo 10 $ \pool -> do
+        logger <- getCurrentLogger
         liftIO $ do
             runSqlPersistMPool (runMigration migrateAll) pool
-            sched <- async $ runLoggingT (schedule pool) logger
+            sched <- async $ rerunHansibleLogger (schedule pool) logger
             websv <- async $ runWebserver pool
 
             monitorStatus [sched, websv]
