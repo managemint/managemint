@@ -15,8 +15,8 @@ import Data.Text (Text)
 
 -- Format: <module><Name>
 
-mainLogSourcesBlocklist = [ "SQL" ] :: [Text]
-mainLogLevel = LevelDebug
+loggerUtilLogSourcesBlocklist = [ "SQL" ] :: [Text]
+loggerUtilLogLevel = LevelDebug
 
 sockReadLen = 2048 :: Int
 

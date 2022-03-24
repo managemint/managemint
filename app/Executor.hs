@@ -18,6 +18,7 @@ import Ansible
 import Sock
 import Config
 import DatabaseUtil
+import LoggerUtil
 
 import Foreign.C.Types
 import Foreign.C.String
@@ -154,20 +155,17 @@ handleCallback CallbackEnd = put True
 handleCallback _ = return ()
 
 -- | Try to process Ansible callbacks as long as iorb is true
-processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) Bool
+processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) ()
 processAnsibleCallbacks iorb = do
-    liftIO $ threadDelay 10000
     (_, _, handle) <- ask
 
     maybe
-        (return ()) -- No Data was recieved
+        (liftIO $ threadDelay 10000) -- No Data was recieved
         (\s -> handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s)
         =<< liftIO (maybeReadHandle handle)
 
     liftIO (readIORef iorb) >>=
-        \b -> if b
-          then processAnsibleCallbacks iorb
-          else get
+        \b -> when b $ processAnsibleCallbacks iorb
 
 determineExecutorStatus :: Int -> Bool -> ExecutorStatus
 determineExecutorStatus 0 False = ExecutorInternalError
@@ -185,20 +183,18 @@ execPlaybook pool rid pb = do
     handle <- liftIO $ handleFromSocket =<< createBindSocket executorSockPath
 
     continue <- liftIO $ newIORef True
-    logger <- askLoggerIO
-    cb  <- liftIO $ async $ runLoggingT (execRWST (processAnsibleCallbacks continue) (pool, rid, handle) False) logger
+    cb  <- asyncWithLogger (execRWST (processAnsibleCallbacks continue) (pool, rid, handle) False)
 
     logDebug "Spawned async callback processor. Now running Ansible"
     ret <- liftIO $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
 
     logDebug $ "Ansible returned with " ++ show ret ++ ". Waiting a bit for all data to arrive..."
 
-    -- Wait for all data to arrive at socket
-    liftIO $ threadDelay 1000000
+    -- Wait for all data to arrive at socket. 2s seems to work
+    liftIO $ threadDelay 2000000
     logDebug "Trying to stop callback processor"
     liftIO $ writeIORef continue False
 
-    -- TODO Check return of StateT??
     (hasEnded,_) <- liftIO $ wait cb
     logDebug "Callback processor stopped"
     unless hasEnded $ logWarn "No Stats-Callback was recieved. Ansible did NOT terminate gracefully."
@@ -211,10 +207,10 @@ execPlaybook pool rid pb = do
 
 
 logInfo :: MonadLogger m => String -> m ()
-logInfo = logInfoNS "Executor" . pack
+logInfo = hLogInfo "Executor"
 
 logDebug :: MonadLogger m => String -> m ()
-logDebug = logDebugNS "Executor" . pack
+logDebug = hLogDebug "Executor"
 
 logWarn :: MonadLogger m => String -> m ()
-logWarn = logWarnNS "Executor" . pack
+logWarn = hLogWarn "Executor"

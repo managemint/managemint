@@ -22,17 +22,7 @@ import Webserver
 import Scheduler
 import Config
 import DatabaseUtil
-
-
-logFilterSource :: Text -> Bool
-logFilterSource = flip notElem mainLogSourcesBlocklist
-
-logFilterLevel :: LogLevel -> Bool
-logFilterLevel = (<=) mainLogLevel
-
-logFilter :: LogSource -> LogLevel -> Bool
-logFilter s l = logFilterLevel l && logFilterSource s
-
+import LoggerUtil
 
 checkThreadOk :: (Show a, Show b) => Maybe (Either a b) -> IO Bool
 checkThreadOk (Just (Left e)) = do
@@ -53,11 +43,11 @@ monitorStatus as = do
 
 main :: IO ()
 main = do
-    runStderrLoggingT $ filterLogger logFilter $ withMySQLPool connectionInfo 10 $ \pool -> do
-        logger <- askLoggerIO
+    runHansibleLogger $ withMySQLPool connectionInfo 10 $ \pool -> do
+        logger <- getCurrentLogger
         liftIO $ do
             runSqlPersistMPool (runMigration migrateAll) pool
-            sched <- async $ runLoggingT (schedule pool) logger
+            sched <- async $ rerunHansibleLogger (schedule pool) logger
             websv <- async $ runWebserver pool
 
             monitorStatus [sched, websv]
