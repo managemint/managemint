@@ -152,7 +152,7 @@ updateConfigRepoJobs :: JobEnv ()
 updateConfigRepoJobs = do
     projects <- lift' getProjects
     cleanupFoldersAndJobs projects
-    mapM_ updateSystemJobs projects
+    gets null >>= \force -> mapM_ (updateSystemJobs force) projects
     get >>= logDebug . mappend "System jobs: " . showJobsT
 
 -- | When a project is deleted in the database remove the folder and its jobs
@@ -168,11 +168,10 @@ cleanupFoldersAndJobs projects = do
             itoList jobs^..traverse.filtered (\(key,_) -> not $ path `isPrefixOf` key) ) remove
 
 -- | Updates the system jobs if the repo changed or doesn't locally exist, else leaves them unchanged
-updateSystemJobs :: Entity Project -> JobEnv ()
-updateSystemJobs project = do
+updateSystemJobs :: Bool -> Entity Project -> JobEnv ()
+updateSystemJobs force project = do
     let oid = projectOid $ entityVal project
-    jobsNull <- gets null
-    ret <- liftIO $ getRepo oid path url branch <&> (& _Right._1.filtered (const jobsNull) .~ True)
+    ret <- liftIO $ getRepo oid path url branch <&> (& _Right._1.filtered (const force) .~ True)
     case ret of
       Left  e            -> markProjectFailed (entityKey project) e
       Right (change,oid) -> do
