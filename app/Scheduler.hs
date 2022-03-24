@@ -46,7 +46,7 @@ import Control.Lens
     , makeLenses
     , makeLensesFor
     , itoList)
-import Control.Lens.Combinators (filtered, ifiltered, itraverse, Indexed (runIndexed))
+import Control.Lens.Combinators (filtered, itraverse, Indexed (runIndexed))
 import Control.Monad (when, filterM, unless)
 import Control.Monad.Trans.Reader (ReaderT)
 import Control.Monad.RWS (RWST, execRWST, ask, liftIO, lift, get, gets, modify)
@@ -104,7 +104,7 @@ runJobs pool jobMap = do
 getDueJobsCalculateTimestamp :: JobEnv Jobs
 getDueJobsCalculateTimestamp = do
     time <- liftIO getTime
-    jobs <- itraverse . runIndexed . ifiltered (\_ j -> j^.timeDue <= time) %%@= \i j -> (M.singleton i j, calAndInsertNextInstance time j)
+    jobs <- itraverse . runIndexed . filtered ((>=) time . view timeDue) %%@= \i j -> (M.singleton i j, calAndInsertNextInstance time j)
     logDebug $ "Due Jobs: " <> showJobsT jobs
     return jobs
         where calAndInsertNextInstance time j = j & timeDue .~ nextInstance time (j^.scheduleFormat)
