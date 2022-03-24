@@ -170,8 +170,8 @@ cleanupFoldersAndJobs projects = do
         liftIO $ mapM_ removeDirectoryRecursive remove
         logDebug ("I removed these folders: " <> showT remove)
         -- TODO: This should be possible without converting the map to a list (ifiltered?)
-        modify $ M.fromList . concat . \jobs -> map ( \path ->
-            itoList jobs^..traverse.filtered (\(key,_) -> not $ path `isPrefixOf` key) ) remove
+        modify $ M.fromList . \jobs -> itoList jobs^..traverse.filtered (\(key,_) -> old key remove)
+                where old key paths = any (`isPrefixOf` key) paths
 
 -- | Updates the system jobs if the repo changed or doesn't locally exist, else leaves them unchanged
 updateSystemJobs :: Bool -> Entity Project -> JobEnv ()
