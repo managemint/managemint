@@ -153,7 +153,7 @@ updateConfigRepoJobs = do
     projects <- lift' getProjects
     cleanupFoldersAndJobs projects
     mapM_ updateSystemJobs projects
-    get >>= logDebug . mappend "System jobs: ". showJobsT
+    get >>= logDebug . mappend "System jobs: " . showJobsT
 
 -- | When a project is deleted in the database remove the folder and its jobs
 cleanupFoldersAndJobs :: [Entity Project] -> JobEnv ()
@@ -185,10 +185,6 @@ updateSystemJobs project = do
         path = projectToPath project
         branch = projectBranch $ entityVal project
 
-getJobsFromProject :: Jobs -> Entity Project -> Jobs
-getJobsFromProject jobs project = M.filter (\t -> t^.repoPath == path) jobs
-    where path = projectToPath project
-
 -- | Tries to parse the config file in the folder pointed to by path.
 -- Writes the parse status and the playbooks specified in the config file in the database and creates/updates the jobs
 readAndParseConfigFile :: String -> FilePath -> Entity Project -> JobEnv ()
@@ -203,8 +199,15 @@ readAndParseConfigFile oid path p = do
 
 -- | Given an oid, path, a playbook kay and the parsed config, created a job
 createJobsFromPlaybookConfiguration :: LocalTime -> String -> String -> (Key Playbook, PlaybookConfiguration) -> (String,Job)
-createJobsFromPlaybookConfiguration time oid path (key, p) = (path ++ pName p,
-    Job{_timeDue=nextInstance time (pSchedule p), _scheduleFormat=pSchedule p, _repoPath=path, _playbook=pFile p, _playbookId=key, _failCount=0, _systemJob=True, _repoIdentifier=oid})
+createJobsFromPlaybookConfiguration time oid path (key, p) =
+    (path ++ pName p, Job { _timeDue=nextInstance time (pSchedule p)
+                          , _scheduleFormat=pSchedule p
+                          , _repoPath=path
+                          , _playbook=pFile p
+                          , _playbookId=key
+                          , _failCount=0
+                          , _systemJob=True
+                          , _repoIdentifier=oid})
 
 markProjectFailed :: Key Project -> String -> JobEnv ()
 markProjectFailed key e = lift' $ update key [ProjectErrorMessage =. e]
@@ -233,7 +236,7 @@ doPullPerhaps oid path branch = do
 
 -- | Recrates the folder, by removing it (if it existed) and cloning the repo
 fillFolder :: String -> String -> String -> IO (Either String (Bool,String))
-fillFolder path url branch = liftIO (removeDicIfExists path) >> doClone url path branch >>= getOidAfterAction
+fillFolder path url branch = removeDicIfExists path >> doClone url path branch >>= getOidAfterAction
     where removeDicIfExists path = doesDirectoryExist path >>= \b -> when b $ removeDirectoryRecursive path
 
 -- | Returns the oid after a pull or clone while respecting failures
@@ -251,12 +254,18 @@ readJobQueueDatabase = do
     time <- liftIO getTime
     let templs = map (\(_,x,y) -> createUserJobs time x y) dataJoin
     mapM_ (lift' . delete . entityKey . fst3) dataJoin
-    modify $ M.union $ M.fromList $ zip [show n ++ schedulerUserTemplateKey | n <- [0..]] templs
+    modify $ M.union $ M.fromList $ zip [schedulerUserTemplateKey ++ "-" ++ show n | n <- [0..]] templs
 
 createUserJobs :: LocalTime -> Entity Playbook -> Entity Project -> Job
 createUserJobs time play proj =
-    Job{_timeDue=time, _scheduleFormat=Now, _repoPath=projectToPath proj, _playbook=playbookFile $ entityVal play,
-                _playbookId=entityKey play, _failCount=0, _systemJob=False, _repoIdentifier=projectOid (entityVal proj)}
+    Job { _timeDue=time
+        , _scheduleFormat=Now
+        , _repoPath=projectToPath proj
+        , _playbook=playbookFile $ entityVal play
+        , _playbookId=entityKey play
+        , _failCount=0
+        , _systemJob=False
+        , _repoIdentifier=projectOid (entityVal proj)}
 
 -- | Assumes ssh format (e.g. @git@git.example.com:test/test-repo.git@) and return the path (e.g. @test/test-repo@)
 -- or an empty string on failure
@@ -320,8 +329,8 @@ logDebug = logDebugNS "Scheduler"
 showT :: Show a => a -> Text
 showT = pack . show
 
-lift' f = do
+lift' action = do
     pool <- ask
-    liftIO $ runSqlPool f pool
+    liftIO $ runSqlPool action pool
 
 -- \MIC\ --
