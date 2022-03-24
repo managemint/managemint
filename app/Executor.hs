@@ -26,11 +26,12 @@ import Control.Concurrent.Async (async, poll, waitCatch, wait)
 import Control.Concurrent (threadDelay)
 
 import Control.Monad (when, unless, void)
-import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, runStderrLoggingT, logInfoNS, logDebugNS, logWarnNS)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
-import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify, gets)
+import Control.Monad.Logger (MonadLogger, LoggingT, runLoggingT, runStderrLoggingT, logInfoNS, logDebugNS, logWarnNS, askLoggerIO)
+--import Control.Monad.IO.Class (liftIO)
+--import Control.Monad.Trans.Class (lift)
+--import Control.Monad.Trans.Reader (Reader, ReaderT, runReaderT, ask)
+--import Control.Monad.Trans.State (State, StateT, runStateT, get, put, modify, gets)
+import Control.Monad.RWS (RWST, execRWST, ask, liftIO, lift, get, gets, modify, put)
 
 import Control.Lens.Operators ((.=))
 import Control.Lens.Combinators (_3, _4)
@@ -131,7 +132,7 @@ data Callback = CallbackResult AnsibleRunnerResult
               | CallbackEnd
               | CallbackOther
 
-type ExecutorMT = StateT (ConnectionPool, RunId, Handle, Bool)
+type ExecutorMT = RWST (ConnectionPool, RunId, Handle) () Bool
 
 -- | Determine, which callback event was recieved, Decode the string
 processAnsibleEvent :: String -> String -> Callback
@@ -143,20 +144,20 @@ processAnsibleEvent e s = case e of
 
 handleCallback :: Callback -> ExecutorMT (LoggingT IO) ()
 handleCallback (CallbackResult arr) = do
-            (pool, rid, _, _) <- get
+            (pool, rid, _ ) <- ask
             logDebug $ "Callback status for '" ++ taskARR arr ++ "' on '" ++ hostARR arr ++ "'"
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
                 (is_item arr) (item arr) "Output not implemented" ) pool
-handleCallback CallbackEnd = _4 .= True
+handleCallback CallbackEnd = put True
 handleCallback _ = return ()
 
 -- | Try to process Ansible callbacks as long as iorb is true
 processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) Bool
 processAnsibleCallbacks iorb = do
     liftIO $ threadDelay 10000
-    (_, _, handle, _) <- get
+    (_, _, handle) <- ask
 
     maybe
         (return ()) -- No Data was recieved
@@ -166,7 +167,7 @@ processAnsibleCallbacks iorb = do
     liftIO (readIORef iorb) >>=
         \b -> if b
           then processAnsibleCallbacks iorb
-          else gets $ \(_, _, _, a) -> a
+          else get
 
 determineExecutorStatus :: Int -> Bool -> ExecutorStatus
 determineExecutorStatus 0 False = ExecutorInternalError
@@ -184,7 +185,8 @@ execPlaybook pool rid pb = do
     handle <- liftIO $ handleFromSocket =<< createBindSocket executorSockPath
 
     continue <- liftIO $ newIORef True
-    cb  <- liftIO $ async $ runStderrLoggingT $ runStateT (processAnsibleCallbacks continue) (pool, rid, handle, False)
+    logger <- askLoggerIO
+    cb  <- liftIO $ async $ runLoggingT (execRWST (processAnsibleCallbacks continue) (pool, rid, handle) False) logger
 
     logDebug "Spawned async callback processor. Now running Ansible"
     ret <- liftIO $ ansiblePlaybook (executionPath pb) (playbookName pb) (targetLimit pb) (executeTags pb)
@@ -197,7 +199,7 @@ execPlaybook pool rid pb = do
     liftIO $ writeIORef continue False
 
     -- TODO Check return of StateT??
-    (hasEnded, _) <- liftIO $ wait cb
+    (hasEnded,_) <- liftIO $ wait cb
     logDebug "Callback processor stopped"
     unless hasEnded $ logWarn "No Stats-Callback was recieved. Ansible did NOT terminate gracefully."
 

@@ -87,8 +87,8 @@ showJobsT :: Jobs -> Text
 showJobsT = intercalate ", " . map (\(k,v) -> showT k <> " at " <> showJob v) . M.toList
     where showJob j = pack $ takeWhile (/= '.') $ show (j^.timeDue)
 
-schedule :: ConnectionPool -> IO ()
-schedule pool = runStderrLoggingT $ runJobs pool M.empty
+schedule :: ConnectionPool -> (LoggingT IO) ()
+schedule pool = runJobs pool M.empty
 
 -- | Given a list of jobs, updates them (force update by passing empty map as argument), reads the user jobs from the databse and executes all due ones
 runJobs :: ConnectionPool -> Jobs -> LoggingT IO ()
