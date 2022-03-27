@@ -35,7 +35,6 @@ dependencies:
 - yesod-form
 - lens
 - time-compat
-- split
 - containers
 - mtl
 - text
