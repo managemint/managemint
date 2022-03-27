@@ -40,7 +40,6 @@ import Text.ParserCombinators.Parsec
     , setSourceColumn
     , spaces
     , eof
-    , chainl1
     , skipMany1
     , newline
     , (<|>)
@@ -52,7 +51,9 @@ import Text.ParserCombinators.Parsec
     , skipMany
     , satisfy
     , many
-    , digit)
+    , digit
+    , space
+    , sepEndBy, sepBy1)
 import Control.Lens ((&), (%~), _1, (<&>))
 
 
@@ -152,7 +153,8 @@ isKey _       = False
 
 parseTomlishTree :: MonadFail m => String -> m TomlishTree
 parseTomlishTree str =
-    case runParser parseTop () "" str of
+    -- TODO: Remove is only quickfix
+    case runParser parseTop () "" (map (\c -> if c == '\n' then ';' else c) str) of
       Left err -> fail $ show err
       Right t  -> buildTomlishTree t
 
@@ -170,7 +172,10 @@ parseTomlish (file, line, col) s =
            return e
 
 parseTop :: CharParser st [Tomlish]
-parseTop = parseNode `chainl1` (skipMany1 (newline <|> char ';') >> return (++))
+parseTop = concat <$> sepEndBy parseNode (skipMany1 linebreak)
+
+linebreak :: CharParser st ()
+linebreak = spaces *> (newline <|> char ';') *> spaces
 
 parseNode :: CharParser st [Tomlish]
 parseNode =  (NewSegment:) <$> brackets parsePath
@@ -181,13 +186,13 @@ parseKeyValue = KeyVal <$> (parseTomlishKey <* spaces <* char '=') <*> (spaces *
 
 parseValue :: CharParser st TomlishType
 parseValue =  TomlishInt <$> integral
-          <|> TomlishString <$> between (char '"') (char '"') (many1 (noneOf ['\n','"']))
-          <|> TomlishString <$> between (char '\'') (char '\'') (many1 (noneOf ['\n','\'']))
+          <|> TomlishString <$> between (char '"') (char '"') (many1 (noneOf [';','\n','"']))
+          <|> TomlishString <$> between (char '\'') (char '\'') (many1 (noneOf [';','\n','\'']))
           <|> TomlishAntiString <$> (char '$' *> hsVarName)
           <|> TomlishAntiInt <$> (char '€' *> hsVarName)
 
 parsePath :: CharParser st [Tomlish]
-parsePath = fmap ((:[]) . Key) parseTomlishKey `chainl1` (char '.' >> return (++))
+parsePath = map Key <$> sepBy1 parseTomlishKey (char '.')
 
 parseTomlishKey :: CharParser st TomlishKey
 parseTomlishKey =  TomlishKey <$> many1 alphaNum
@@ -227,7 +232,7 @@ quoteTomlishTreeExp s = do loc <- location
                            let pos = ( loc_filename loc
                                      , fst (loc_start loc)
                                      , snd (loc_start loc))
-                           tomli <- parseTomlish pos s
+                           tomli <- buildTomlishTree =<< parseTomlish pos s
                            dataToExpQ (const Nothing `extQ` antiTomlishTypeExp `extQ` antiTomlishKeyExp) tomli
 
 antiTomlishTypeExp :: TomlishType -> Maybe ExpQ

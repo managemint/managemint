@@ -1,8 +1,3 @@
-{-# LANGUAGE QuasiQuotes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE GADTs #-}
 {- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -12,6 +7,12 @@
  - published by the Free Software Foundation.
  -
  -}
+
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 
 module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
 
@@ -43,7 +44,7 @@ parseConfigFile path = do
                       contents >>= parseTomlishTree >>= extractPlaybooks
     return $ fromMaybe [] contents'
 
--- TODO: This is fucking wrong
+-- TODO: This is ugly
 extractPlaybooks :: TomlishTree -> Maybe [PlaybookConfiguration]
 extractPlaybooks tt = do
     trees <- getLeavesAt [TomlishRoot, TomlishKey "run"] tt
