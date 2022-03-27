@@ -19,9 +19,10 @@ import DatabaseUtil
 import ScheduleFormat
 import Parser
 import TomlishParser
+import Tree (getLeavesAt, Tree(Node))
 
 import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (ask)
 import Control.Exception (try)
@@ -39,17 +40,21 @@ parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
 parseConfigFile path = do
     contents <- liftIO $ try $ readFile $ path ++ "/hansible.conf"
     let contents' = (\case {Left (e :: IOError) -> Nothing; Right v -> Just v})
-                      contents >>= compileTomlish
-    case contents' of
-        Nothing -> return []
-        Just v  -> return $ mapMaybe (parseTomlishTree . (:[])) v
+                      contents >>= parseTomlishTree >>= extractPlaybooks
+    return $ fromMaybe [] contents'
 
-parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
-parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
+-- TODO: This is fucking wrong
+extractPlaybooks :: TomlishTree -> Maybe [PlaybookConfiguration]
+extractPlaybooks tt = do
+    trees <- getLeavesAt [TomlishRoot, TomlishKey "run"] tt
+    mapM (extractData . (\t -> Node TomlishRoot [Node (TomlishKey "run") [t]])) trees
+
+extractData :: TomlishTree -> Maybe PlaybookConfiguration
+extractData [tomlish|[run.$name];file = $f;schedule = $s|] =
     case parseScheduleFormat s of
       Nothing -> Nothing
       Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
-parseTomlishTree _ = Nothing
+extractData _ = Nothing
 
 writePlaybookInDatabase key p = do
     pool <- ask
@@ -58,4 +63,3 @@ writePlaybookInDatabase key p = do
       case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
         []     -> insert $ Playbook key (pFile p) (pName p)
         (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
-

@@ -17,22 +17,24 @@ module Tree where
 import Prelude hiding (lookup)
 import Control.Lens ((<&>), Index, IxValue, Ixed, At)
 import Control.Lens.At (Ixed(ix), At (at))
+import Control.Monad (join)
 import Data.Generics (Data)
 import Data.Maybe (listToMaybe, mapMaybe)
 
 data Tree a b = Node a [Tree a b] | Leaf b
     deriving (Show, Data)
 
+-- TODO: Check if the functions are correkt and the lens laws are not violated
+-- REFACTOR!
+
 type instance Index (Tree k v) = [k]
 type instance IxValue (Tree k v) = v
 
--- TODO: Check if this makes sense
 instance (Eq k) => Ixed (Tree k v) where
     ix k f m = case lookup k m of
                  Just v  -> f v <&> \v' -> replace k v' m
                  Nothing -> pure m
 
--- TODO: Check if this makes sense
 instance (Eq k) => At (Tree k v) where
     at k f m = f mv <&> \case
         Nothing -> maybe m (const (delete k m)) mv
@@ -76,3 +78,9 @@ replace (k:ks) v (Node k' ls)
     | k == k' = Node k (map (replace ks v) ls)
 replace [] v (Leaf  v') = Leaf v
 replace _ _ t = t
+
+getLeavesAt :: Eq k => [k] -> Tree k v -> Maybe [Tree k v]
+getLeavesAt [] (Node _ ls)     = Just ls
+getLeavesAt (k:ks) (Node k' ls)
+    | k == k' = join . listToMaybe $ map (getLeavesAt ks) ls
+getLeavesAt _ _ = Nothing

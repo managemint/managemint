@@ -9,8 +9,9 @@
  -}
 
 {-# LANGUAGE DeriveDataTypeable #-}
---module TomlishParser(TomlishType(TomlishString, TomlishInt), TomlishKey(TomlishRoot, TomlishKey), tomlish) where
-module TomlishParser where
+{-# LANGUAGE TupleSections #-}
+
+module TomlishParser(TomlishTree, TomlishType(TomlishString, TomlishInt), TomlishKey(TomlishRoot, TomlishKey), tomlish, parseTomlishTree) where
 
 import Tree
 import Language.Haskell.TH
@@ -28,6 +29,7 @@ import Language.Haskell.TH.Quote (QuasiQuoter(..), dataToPatQ, dataToExpQ)
 import Data.Generics (Data, extQ)
 import Data.Char (isLower, isAlpha, digitToInt)
 import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Foldable (fold)
 import Text.ParserCombinators.Parsec
     ( CharParser
     , runParser
@@ -51,7 +53,7 @@ import Text.ParserCombinators.Parsec
     , satisfy
     , many
     , digit)
-import Control.Lens ((&), (%~), _1)
+import Control.Lens ((&), (%~), _1, (<&>))
 
 
 data TomlishKey = TomlishKey String
@@ -63,13 +65,10 @@ data TomlishType = TomlishString String
                  | TomlishAntiString String
                  | TomlishInt Int
                  | TomlishAntiInt String
-                 deriving (Show, Data)
+                 deriving (Show, Data, Eq)
 
--- Datenstruktur so ändern, dass klar ist wann ein Segment endet
--- z.B. [tomlish|[Hallo];[Hallo.DU]|] ist nicht erkennbar, dass [Hallo.DU] ein neuer Abschniit
--- und nicht ein Unterabschnitt [Hallo.Hallo.DU] ist.
-data Tomlish = Key TomlishKey | KeyVal TomlishKey TomlishType
-    deriving (Show,Data)
+data Tomlish = Key TomlishKey | KeyVal TomlishKey TomlishType | NewSegment
+    deriving (Show,Data,Eq)
 
 type TomlishTree = Tree TomlishKey TomlishType
 
@@ -83,23 +82,25 @@ instance Eq TomlishKey where
 
 -- /TREE-BUILDING/ --
 
--- TODO Monad Fail! (Should not fail, but just to be sure)
-buildTomlishTree :: [Tomlish] -> TomlishTree
-buildTomlishTree ts = Node TomlishRoot $ foldMap createSubtrees (classifyClubs $ createClubs ts)
+buildTomlishTree :: MonadFail m => [Tomlish] -> m TomlishTree
+buildTomlishTree ts = do
+    clubs <- classifyClubs <$> createClubs ts
+    leaves <- fold <$> mapM createSubtrees clubs
+    return $ Node TomlishRoot leaves
 
--- TODO Monad Fail! (Should not fail, but just to be sure)
-createSubtrees :: [TomlishClub] -> [TomlishTree]
+createSubtrees :: MonadFail m => [TomlishClub] -> m [TomlishTree]
 createSubtrees tcs
-    | length tcs == 1 = clubToTree $ head tcs
-    | otherwise       = [Node (clubHead $ head tcs) $ foldMap createSubtrees (classifyClubs $ map clubTail tcs)]
+    | length tcs == 1 = return $ clubToTree $ head tcs
+    | otherwise       = do
+        key <- clubHead $ head tcs
+        leaves <- fold <$> mapM createSubtrees (classifyClubs $ map clubTail tcs)
+        return [Node key leaves]
 
--- TODO Monad Fail! (Should not fail, but just to be sure)
-clubHead :: TomlishClub -> TomlishKey
-clubHead = head . fst
+clubHead :: MonadFail m => TomlishClub -> m TomlishKey
+clubHead = safeHead . fst
 
--- TODO Monad Fail! (Should not fail, but just to be sure)
 clubTail :: TomlishClub -> TomlishClub
-clubTail c = c & _1 %~ tail
+clubTail c = c & _1 %~ drop 1
 
 clubToTree :: TomlishClub -> [TomlishTree]
 clubToTree ([],kv)   = map (\(k,v) -> Node k [Leaf v]) kv
@@ -108,16 +109,17 @@ clubToTree (x:xs,kv) = [Node x $ clubToTree (xs,kv)]
 -- | Extracts the segments from a tomlish-list.
 -- A segment ist a list of keys (the path) with a list of key values (the leaves).
 -- It forms a list of Keys with a List of key-values at the end, thefore a club
-createClubs :: [Tomlish] -> [TomlishClub]
-createClubs = map (extract . span isKey) . helper False
+createClubs :: MonadFail m => [Tomlish] -> m [TomlishClub]
+createClubs = mapM createClub . seperateOn NewSegment
+
+createClub :: MonadFail m => [Tomlish] -> m TomlishClub
+createClub ts = mapM extractKeyVal vals <&> (map (\(Key k) -> k) keys,)
     where
-        helper _ [] = []
-        helper valBefore ts'@(t:ts)
-          | valBefore && isKey t = [] : helper False ts'
-          | otherwise = let (s,ss) = uncons (helper (isKeyVal t) ts)
-                         in (t:s) : ss
-        -- TODO Monad Fail!
-        extract (ks,kvs) = (map (\(Key k) -> k) ks, map (\(KeyVal k v) -> (k,v)) kvs)
+        (keys,vals) = span isKey ts
+
+extractKeyVal :: MonadFail m => Tomlish -> m (TomlishKey, TomlishType)
+extractKeyVal (KeyVal k v) = return (k,v)
+extractKeyVal _ = fail "Not a key-value"
 
 -- | Classifies 'TomlishClub's by their first key.
 -- Key-values always go in their own sperate class
@@ -148,6 +150,12 @@ isKey _       = False
 -- <Value>   ::= Integer Value | <Quoted String>
 -- <Quoted String> ::= " String without Double Quotes or Newline " | ' String without Single Quotes or Newline '
 
+parseTomlishTree :: MonadFail m => String -> m TomlishTree
+parseTomlishTree str =
+    case runParser parseTop () "" str of
+      Left err -> fail $ show err
+      Right t  -> buildTomlishTree t
+
 parseTomlish :: MonadFail m => (String, Int, Int) -> String -> m [Tomlish]
 parseTomlish (file, line, col) s =
     case runParser p () "" s of
@@ -165,7 +173,7 @@ parseTop :: CharParser st [Tomlish]
 parseTop = parseNode `chainl1` (skipMany1 (newline <|> char ';') >> return (++))
 
 parseNode :: CharParser st [Tomlish]
-parseNode =  brackets parsePath
+parseNode =  (NewSegment:) <$> brackets parsePath
          <|> (:[]) <$> parseKeyValue
 
 parseKeyValue :: CharParser st Tomlish
@@ -220,7 +228,6 @@ quoteTomlishTreeExp s = do loc <- location
                                      , fst (loc_start loc)
                                      , snd (loc_start loc))
                            tomli <- parseTomlish pos s
-                           --tomli <- buildTomlishTree <$> parseTomlish pos s
                            dataToExpQ (const Nothing `extQ` antiTomlishTypeExp `extQ` antiTomlishKeyExp) tomli
 
 antiTomlishTypeExp :: TomlishType -> Maybe ExpQ
@@ -237,7 +244,7 @@ quoteTomlishTreePat s = do loc <- location
                            let pos = ( loc_filename loc
                                      , fst (loc_start loc)
                                      , snd (loc_start loc))
-                           tomli <- buildTomlishTree <$> parseTomlish pos s
+                           tomli <- buildTomlishTree =<< parseTomlish pos s
                            dataToPatQ (const Nothing `extQ` antiTomlishTypePat `extQ` antiTomlishKeyPat) tomli
 
 antiTomlishTypePat :: TomlishType -> Maybe PatQ
@@ -266,5 +273,14 @@ classifyBy f (x:xs) = (x : filter (f x) xs)
 uncons :: Monoid a => [a] -> (a,[a])
 uncons []     = (mempty,[])
 uncons (x:xs) = (x,xs)
+
+seperateOn :: Eq a => a -> [a] -> [[a]]
+seperateOn _ [] = []
+seperateOn sep list = l : seperateOn sep (drop 1 r)
+    where (l,r) = span (/= sep) list
+
+safeHead :: MonadFail m => [a] -> m a
+safeHead []    = fail "Head on empty list"
+safeHead (x:_) = return x
 
 -- \EXTRA\ --
