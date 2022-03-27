@@ -9,7 +9,6 @@
  -}
 
 {-# LANGUAGE DeriveDataTypeable #-}
-
 --module TomlishParser(TomlishType(TomlishString, TomlishInt), TomlishKey(TomlishRoot, TomlishKey), tomlish) where
 module TomlishParser where
 
@@ -53,6 +52,7 @@ import Text.ParserCombinators.Parsec
     , many
     , digit)
 import Control.Lens ((&), (%~), _1)
+
 
 data TomlishKey = TomlishKey String
                 | TomlishAntiKey String
@@ -205,13 +205,13 @@ natural = accum <$> many1 (digitToInt <$> digit)
 -- \PARSER\ --
 
 
--- /QUASI-QUOTER/ --
+-- /QUASI-QUOTER/-
 
 tomlish :: QuasiQuoter
 tomlish =  QuasiQuoter { quoteExp  = quoteTomlishTreeExp
                        , quotePat  = quoteTomlishTreePat
-                       , quoteType = error "tomlish"
-                       , quoteDec  = error "tomlish"
+                       , quoteType = const $ fail "Quasi-quoter for types not implemented"
+                       , quoteDec  = const $ fail "Quasi-quoter for declarations not implemented"
                        }
 
 quoteTomlishTreeExp :: String -> ExpQ

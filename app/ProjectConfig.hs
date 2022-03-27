@@ -1,4 +1,8 @@
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {- app/PlaybookConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -9,19 +13,18 @@
  -
  -}
 
---module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
+module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
 
 import DatabaseUtil
 import ScheduleFormat
-import TomlishParser
 import Parser
+import TomlishParser
 
-import qualified Data.Map as M
-import Database.Persist.MySQL hiding (get)
-import Control.Monad.Trans.Reader
-import System.IO
+import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
 import Data.Maybe (mapMaybe)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.RWS (ask)
+import Control.Exception (try)
 
 data PlaybookConfiguration = PlaybookConfiguration
     { pName :: String
@@ -30,29 +33,29 @@ data PlaybookConfiguration = PlaybookConfiguration
     }
     deriving (Show)
 
-foo :: Tomlishs -> Bool
-foo [tomlish|hallo = $hi|] = hi == "hi"
-foo _ = False
+-- | Tries to parse the config file in the folder pointed to by path
+-- If the parsing fails updates the database
+parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
+parseConfigFile path = do
+    contents <- liftIO $ try $ readFile $ path ++ "/hansible.conf"
+    let contents' = (\case {Left (e :: IOError) -> Nothing; Right v -> Just v})
+                      contents >>= compileTomlish
+    case contents' of
+        Nothing -> return []
+        Just v  -> return $ mapMaybe (parseTomlishTree . (:[])) v
 
---parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
---parseConfigFile path = do
---    contents <- readFile $ path ++ "/hansible.conf"
---    return $ case compileTomlish contents of
---               Left  err -> []
---               Right trees -> mapMaybe parseTomlishTree trees
+parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
+parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
+    case parseScheduleFormat s of
+      Nothing -> Nothing
+      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
+parseTomlishTree _ = Nothing
 
--- [tomlish|[run.$name]\nfile = $f\nschedule = $s|]
---parseTomlishTree :: [TomlishTree] -> Maybe PlaybookConfiguration
---parseTomlishTree [tomlish|[run.$name];file = $f;schedule = $s|] =
---parseTomlishTree (Node (TomlishKey "run") [Node (TomlishKey name) [Leave (TomlishKey "file") (TomlishString f), Leave (TomlishKey "schedule") (TomlishString s)]]) =
---    case parseScheduleFormat s of
---      Nothing -> Nothing
---      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
---parseTomlishTree _ = Nothing
-
-writePlaybookInDatabase :: Key Project -> PlaybookConfiguration -> ReaderT SqlBackend IO (Key Playbook)
 writePlaybookInDatabase key p = do
-    playbooks <- getPlaybooks key
-    case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
-      []     -> insert $ Playbook key (pFile p) (pName p)
-      (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
+    pool <- ask
+    liftIO $ flip runSqlPool pool $ do
+      playbooks <- getPlaybooks key
+      case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
+        []     -> insert $ Playbook key (pFile p) (pName p)
+        (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
+

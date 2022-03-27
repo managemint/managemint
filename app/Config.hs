@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {- app/Config.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -9,12 +10,26 @@
  -}
 
 module Config where
+import Control.Monad.Logger (LogLevel(..))
+import Data.Text (Text)
+
 -- Format: <module><Name>
 
-sockReadLen :: Int
-sockReadLen = 2048
+loggerUtilLogSourcesBlocklist = [ "SQL" ] :: [Text]
+loggerUtilLogLevel = LevelDebug
+
+sockReadLen = 2048 :: Int
+
 schedulerFailMax = 3 :: Int
-schedulerUserTemplateKey = "USERTEMPLATE" -- Parser is not allowed to parse a job name starting with this string
-schedulerFolders = ["app",".stack-work","venv","csrc",".git"] -- TODO: Remove this as soon as the repos live in their own folder
+schedulerUserTemplateKey = "USERTEMPLATE"
+schedulerFolders = ["app",".stack-work","venv","csrc",".git","static"] -- TODO: Remove this as soon as the repos live in their own folder
+schedulerRepoRoot = "." :: FilePath
 
 executorSockPath = "/tmp/hansible.sock"
+
+webserverPort = 3000 :: Int
+
+databaseUtilConnectHost     = "mdbtest-11.my.cum.re"
+databaseUtilConnectUser     = "hansible"
+databaseUtilConnectPassword = "AffqDbF2Vw5Aq7EHferw"
+databaseUtilConnectDatabase = "hansible"
