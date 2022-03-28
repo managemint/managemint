@@ -153,7 +153,7 @@ isKey _       = False
 
 parseTomlishTree :: MonadFail m => String -> m TomlishTree
 parseTomlishTree str =
-    -- TODO: Remove is only quickfix
+    -- TODO: Remove only quickfix
     case runParser parseTop () "" (map (\c -> if c == '\n' then ';' else c) str) of
       Left err -> fail $ show err
       Right t  -> buildTomlishTree t
