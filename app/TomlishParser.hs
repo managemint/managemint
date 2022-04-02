@@ -186,8 +186,8 @@ parseKeyValue = KeyVal <$> (parseTomlishKey <* spaces <* char '=') <*> (spaces *
 
 parseValue :: CharParser st TomlishType
 parseValue =  TomlishInt <$> integral
-          <|> TomlishString <$> between (char '"') (char '"') (many1 (noneOf [';','\n','"']))
-          <|> TomlishString <$> between (char '\'') (char '\'') (many1 (noneOf [';','\n','\'']))
+          <|> TomlishString <$> between (char '"') (char '"') (many (noneOf [';','\n','"']))
+          <|> TomlishString <$> between (char '\'') (char '\'') (many (noneOf [';','\n','\'']))
           <|> TomlishAntiString <$> (char '$' *> hsVarName)
           <|> TomlishAntiInt <$> (char '€' *> hsVarName)
 
