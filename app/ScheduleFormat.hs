@@ -10,20 +10,17 @@
 
 {-# LANGUAGE TemplateHaskell #-}
 
---module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
-module ScheduleFormat where
+module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
 
-import Data.Time.Compat
-import Data.Time.Calendar.Compat
-import Data.Time.LocalTime.Compat
-import Data.Time.Clock.Compat
+import Data.Time.Calendar.Compat (DayOfWeek (..), Day, dayOfWeek, firstDayOfWeekOnAfter, addDays)
+import Data.Time.LocalTime.Compat (TimeOfDay (..), LocalTime (..), dayFractionToTimeOfDay, midnight)
 import Data.Functor ((<&>))
 import Data.List (intercalate, nub)
-import Data.List.Split (splitOn)
-import Control.Lens
-import Control.Applicative
-import Text.Read
 import Parser
+import Control.Lens.Combinators (makeLenses)
+import Control.Lens (makeLensesFor, (^.), (^?!))
+import Control.Applicative (Alternative ((<|>)))
+import Text.Read (readMaybe)
 
 data Schedule = Schedule {_scheduleDay :: [DayOfWeek], _scheduleTime :: Maybe ScheduleTime} | Now
 data ScheduleTime =
