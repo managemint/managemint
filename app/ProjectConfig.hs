@@ -10,9 +10,9 @@
 
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module ProjectConfig (PlaybookConfiguration (..), parseConfigFile, writePlaybookInDatabase) where
 
@@ -23,10 +23,13 @@ import TomlishParser
 import Tree (getLeavesAt, Tree(Node))
 
 import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
-import Data.Maybe (mapMaybe, fromMaybe)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (ask)
 import Control.Exception (try)
+import Data.Bifunctor (Bifunctor(first))
+
+instance MonadFail (Either String) where
+    fail = Left
 
 data PlaybookConfiguration = PlaybookConfiguration
     { pName :: String
@@ -37,25 +40,23 @@ data PlaybookConfiguration = PlaybookConfiguration
 
 -- | Tries to parse the config file in the folder pointed to by path
 -- If the parsing fails updates the database
-parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
+parseConfigFile :: FilePath -> IO (Either String [PlaybookConfiguration])
 parseConfigFile path = do
     contents <- liftIO $ try $ readFile $ path ++ "/hansible.conf"
-    let contents' = (\case {Left (e :: IOError) -> Nothing; Right v -> Just v})
-                      contents >>= parseTomlishTree >>= extractPlaybooks
-    return $ fromMaybe [] contents'
+    return $ mapLeft (\(e :: IOError) -> show e) contents >>= parseTomlishTree >>= extractPlaybooks
 
 -- TODO: This is ugly
-extractPlaybooks :: TomlishTree -> Maybe [PlaybookConfiguration]
+extractPlaybooks :: TomlishTree -> Either String [PlaybookConfiguration]
 extractPlaybooks tt = do
     trees <- getLeavesAt [TomlishRoot, TomlishKey "run"] tt
     mapM (extractData . (\t -> Node TomlishRoot [Node (TomlishKey "run") [t]])) trees
 
-extractData :: TomlishTree -> Maybe PlaybookConfiguration
+extractData :: TomlishTree -> Either String PlaybookConfiguration
 extractData [tomlish|[run.$name];file = $f;schedule = $s|] =
     case parseScheduleFormat s of
-      Nothing -> Nothing
-      Just s' -> Just PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
-extractData _ = Nothing
+      Nothing -> Left "Failed to parse the schedule-format"
+      Just s' -> Right PlaybookConfiguration{pName=name, pFile=f, pSchedule=s'}
+extractData _ = Left "One or more necessary key-value fields are missing in the project config"
 
 writePlaybookInDatabase key p = do
     pool <- ask
@@ -64,3 +65,6 @@ writePlaybookInDatabase key p = do
       case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
         []     -> insert $ Playbook key (pFile p) (pName p)
         (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
+
+mapLeft :: (a -> c) -> Either a b -> Either c b
+mapLeft = first

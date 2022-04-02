@@ -74,7 +74,6 @@ data Job = Job { _timeDue :: LocalTime
                , _repoIdentifier :: String}
 -- The key is the project path (git project name plus databse id) plus the playbook
 type Jobs = M.Map String Job
--- TODO: We probably don't want to use monad logger, and instead use the writer in the RWST stack
 type JobEnv = RWST ConnectionPool () Jobs (LoggingT IO)
 
 makeLenses ''Job
@@ -196,11 +195,12 @@ readAndParseConfigFile :: String -> FilePath -> Entity Project -> JobEnv ()
 readAndParseConfigFile oid path p = do
     pcs <- liftIO $ parseConfigFile path
     time <- liftIO getTime
-    if null pcs then lift' $ update (entityKey p) [ProjectErrorMessage =. "Error in the config file"]
-                else do
-                    keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
-                    mapM_ (\(key, job) -> at key .= Just job) $
-                        zipWith (curry (createJobsFromPlaybookConfiguration time oid path)) keys pcs
+    case pcs of
+      Left  e -> lift' $ update (entityKey p) [ProjectErrorMessage =. e]
+      Right v -> do
+          keys <- mapM (writePlaybookInDatabase (entityKey p)) v
+          mapM_ (\(key, job) -> at key .= Just job) $
+              zipWith (curry (createJobsFromPlaybookConfiguration time oid path)) keys v
 
 -- | Given an oid, path, a playbook kay and the parsed config, created a job
 createJobsFromPlaybookConfiguration :: LocalTime -> String -> String -> (Key Playbook, PlaybookConfiguration) -> (String,Job)
