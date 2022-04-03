@@ -25,6 +25,8 @@ schedulerUserTemplateKey = "USERTEMPLATE"
 schedulerFolders = ["app",".stack-work","venv","csrc",".git","static"] -- TODO: Remove this as soon as the repos live in their own folder
 schedulerRepoRoot = "." :: FilePath
 
+projectConfigFile = "managemint.conf"
+
 executorSockPath = "/tmp/managemint.sock"
 
 webserverPort = 3000 :: Int

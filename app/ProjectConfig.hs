@@ -19,6 +19,7 @@ import DatabaseUtil
 import ScheduleFormat
 import Parser
 import TomlishParser
+import Config
 
 import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
 import Data.Maybe (mapMaybe)
@@ -37,7 +38,7 @@ data PlaybookConfiguration = PlaybookConfiguration
 -- If the parsing fails updates the database
 parseConfigFile :: FilePath -> IO [PlaybookConfiguration]
 parseConfigFile path = do
-    contents <- liftIO $ try $ readFile $ path ++ "/hansible.conf"
+    contents <- liftIO $ try $ readFile $ path ++ "/" ++ projectConfigFile
     let contents' = (\case {Left (e :: IOError) -> Nothing; Right v -> Just v})
                       contents >>= compileTomlish
     case contents' of

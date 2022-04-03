@@ -1,12 +1,12 @@
-# hansible
+# managemint
 
-![hansible](static/logo.png "hansible")
+![managemint](static/logo.png "managemint")
 
 ## Verwendung
 
 ### Compilieren
 
-Neben Stack und den damit installierten dependencies benötigt hansible `python` und `libgit2`.
+Neben Stack und den damit installierten dependencies benötigt managemint `python` und `libgit2`.
 Da CPython seine Header und Library in versionsspezifischen Ordnern hinterlegt, muss diese in der `package.yml` entsprechend angegeben werden:
 
 ```yml
@@ -30,8 +30,8 @@ Getestete Versionen:
 
 ### Setup
 
-Neben dem basis hansible-Projekt werden außerdem die python-Module `hansible_glue` und `ansible`,
-sowie das Ansible-Galaxy Modul `hansible_modules` benötigt.
+Neben dem basis managemint-Projekt werden außerdem die python-Module `managemint_glue` und `ansible`,
+sowie das Ansible-Galaxy Modul `managemint_modules` benötigt.
 Die installation erfolgt im jeweiligen Quellcode-Ordner mit `pip install .` bzw. `ansible-galaxy collection install .`.
 Hierfür empfiehlt sich ein Virtualenv.
 
@@ -43,7 +43,7 @@ Das Webinterface ist nach korrekter Konfiguration auf port `3000` zu erreichen.
 ### Projekte
 
 Ausgangspunkt ist eine Repository mit Ansible-Struktur, siehe `ansible-example`.
-In dessen Wurzel wird nun eine `hansible.conf`-Datei angelegt.
+In dessen Wurzel wird nun eine `managemint.conf`-Datei angelegt.
 
 Diese kann wie folgt aussehen:
 
