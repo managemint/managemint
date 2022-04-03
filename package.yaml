@@ -1,4 +1,4 @@
-name:                hansible
+name:                managemint
 version:             0.1.0.0
 license:             GPL-3
 author:
@@ -52,4 +52,3 @@ executables:
     - -rtsopts
     - -with-rtsopts=-N
     dependencies: []
-      #    - hansible-ansible

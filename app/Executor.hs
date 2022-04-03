@@ -174,7 +174,7 @@ execPlaybook :: ConnectionPool -> RunId -> AnsiblePlaybook -> (LoggingT IO) Exec
 execPlaybook pool rid pb = do
     logInfo $ "RUN #" ++ show (keyToInt rid) ++ ": Executing " ++ show pb
 
-    liftIO $ putEnv $ "HANSIBLE_OUTPUT_SOCKET=" ++ executorSockPath
+    liftIO $ putEnv $ "MANAGEMINT_OUTPUT_SOCKET=" ++ executorSockPath
     handle <- liftIO $ handleFromSocket =<< createBindSocket executorSockPath
 
     continue <- liftIO $ newIORef True

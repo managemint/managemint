@@ -53,7 +53,7 @@ static void run_ansible( char* _path, char *_playbook, char *_limit, char *_tag 
 		exit(-1);
 	}
 
-	putenv("ANSIBLE_STDOUT_CALLBACK=ffpp.hansible_modules.hansible_export");
+	putenv("ANSIBLE_STDOUT_CALLBACK=managemint.modules.managemint_export");
 
 	/* TODO: Use those! */
 	if (!_limit)
@@ -63,7 +63,7 @@ static void run_ansible( char* _path, char *_playbook, char *_limit, char *_tag 
 
 	Py_Initialize();
 
-	run_func = import_name("hansible_glue", "run_playbook");
+	run_func = import_name("managemint_glue", "run_playbook");
 	state = PyGILState_Ensure();
 
 	if (!run_func || !PyCallable_Check(run_func)) {
