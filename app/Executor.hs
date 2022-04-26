@@ -134,7 +134,7 @@ type ExecutorMT = RWST (ConnectionPool, RunId, Handle) () Bool
 processAnsibleEvent :: String -> String -> Callback
 processAnsibleEvent e s = case e of
         "task_runner_result" -> CallbackResult (decodeJSON s :: AnsibleRunnerResult)
-        "task_runner_start"  -> CallbackOther -- CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
+        "task_runner_start"  -> CallbackOther -- (Unused) CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
         "end"                -> CallbackEnd
         _                    -> CallbackOther
 
@@ -154,13 +154,21 @@ processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) ()
 processAnsibleCallbacks iorb = do
     (_, _, handle) <- ask
 
+    -- Only check IORef, when no data was recieved so we don't
+    -- terminate prematurely
+    -- TODO: refactor
     maybe
-        (liftIO $ threadDelay 10000) -- No Data was recieved
-        (\s -> handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s)
+        (do
+            liftIO $ threadDelay 10000 -- No Data was recieved
+            liftIO (readIORef iorb) >>=
+                \b -> when b $ processAnsibleCallbacks iorb
+        )
+        (\s -> do
+            handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s
+            processAnsibleCallbacks iorb
+        )
         =<< liftIO (maybeReadHandle handle)
 
-    liftIO (readIORef iorb) >>=
-        \b -> when b $ processAnsibleCallbacks iorb
 
 determineExecutorStatus :: Int -> Bool -> ExecutorStatus
 determineExecutorStatus 0 False = ExecutorInternalError
