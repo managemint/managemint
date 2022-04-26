@@ -1,6 +1,6 @@
 #!/bin/bash
 
-rm -f /tmp/hansible.sock
+rm -f /tmp/hansible*
 
 test -d venv || ./testsetup.sh || exit 1
 

@@ -5,8 +5,8 @@
 
 PYTHON='/usr/bin/env python3'
 
-REPO_GLUE='ssh://git@giteaprod-01.my.cum.re/ffpp/managemint-glue.git#egg=managemint-glue'
-REPO_GALAXY='git@giteaprod-01.my.cum.re:ffpp/managemint-modules.git'
+REPO_GLUE='https://github.com/managemint/managemint-glue.git#egg=managemint-glue'
+REPO_GALAXY='https://github.com/managemint/managemint-modules.git'
 
 $PYTHON -m virtualenv venv
 
