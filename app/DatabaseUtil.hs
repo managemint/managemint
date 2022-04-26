@@ -64,6 +64,8 @@ Event
     is_item Bool
     item String
     output String
+    is_delegate Bool
+    delegate_host String
 JobQueue
     playbookId PlaybookId OnDeleteCascade
     arguments String
