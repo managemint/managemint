@@ -145,7 +145,7 @@ handleCallback (CallbackResult arr) = do
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
-                (is_item arr) (item arr) "Output not implemented" ) pool
+                (is_item arr) (item arr) "Output not implemented" (delegate arr) (delegate_host arr) ) pool
 handleCallback CallbackEnd = put True
 handleCallback _ = return ()
 
