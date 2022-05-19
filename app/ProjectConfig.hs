@@ -21,6 +21,7 @@ import ScheduleFormat
 import Parser
 import TomlishParser
 import Tree (getLeavesAt, Tree(Node))
+import Config
 
 import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
 import Control.Monad.IO.Class (liftIO)
@@ -42,7 +43,7 @@ data PlaybookConfiguration = PlaybookConfiguration
 -- If the parsing fails updates the database
 parseConfigFile :: FilePath -> IO (Either String [PlaybookConfiguration])
 parseConfigFile path = do
-    contents <- liftIO $ try $ readFile $ path ++ "/hansible.conf"
+    contents <- liftIO $ try $ readFile $ path ++ "/" ++ projectConfigFile
     return $ mapLeft (\(e :: IOError) -> show e) contents >>= parseTomlishTree >>= extractPlaybooks
 
 -- TODO: This is ugly

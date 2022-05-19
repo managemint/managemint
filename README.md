@@ -1,13 +1,19 @@
-# hansible
+# managemint
 
-![hansible](static/logo.png "hansible")
+![managemint](static/logo.png "managemint")
 
-## Verwendung
+managemint is a purpose-built CI for ansible.
+It aims to give users a better insight of the state of their Playbook runs.
 
-### Compilieren
+managemint is in early developement and not yet stable.
 
-Neben Stack und den damit installierten dependencies benötigt hansible `python` und `libgit2`.
-Da CPython seine Header und Library in versionsspezifischen Ordnern hinterlegt, muss diese in der `package.yml` entsprechend angegeben werden:
+## Usage
+
+### Building
+
+managemint is written in Haskell and uses the stack build-system to install Haskell dependencies.
+On top of those, managemint depends on `python` and `libgit2`.
+Because of CPython's hardcoded version in the library name, it is necessary to specify the exact version in `package.yml`:
 
 ```yml
 ...
@@ -23,29 +29,33 @@ extra-libraries:
 ...
 ```
 
-Getestete Versionen:
+Tested versions:
 
 * `python` 3.9, 3.10
 * `libgit2` 1.1, 1.4
 
 ### Setup
 
-Neben dem basis hansible-Projekt werden außerdem die python-Module `hansible_glue` und `ansible`,
-sowie das Ansible-Galaxy Modul `hansible_modules` benötigt.
-Die installation erfolgt im jeweiligen Quellcode-Ordner mit `pip install .` bzw. `ansible-galaxy collection install .`.
-Hierfür empfiehlt sich ein Virtualenv.
+This is an experimental developement setup only.
 
-Zur Ausführung wird weiter eine MySQL-Datenbank benötigt (getestet mit MariaDB 10.5).
-Die Zugansdaten müssen in `app/Config.hs` angepasst werden.
+managemint depends on a python-package and a Ansible-Galaxy colection,
+`manageint_glue` and `managemint_modules`.
 
-Das Webinterface ist nach korrekter Konfiguration auf port `3000` zu erreichen.
+Install them with running `pip install .` and `ansible-galaxy collection install .`
+in the respective source folders.
+A virtaulenv for python packages is refcommended.
 
-### Projekte
+A MySQL Database (tested with MariaDB 10.5) is required to run managemint.
+Connection parameters are hardcoded in `app/Config.hs` for now.
 
-Ausgangspunkt ist eine Repository mit Ansible-Struktur, siehe `ansible-example`.
-In dessen Wurzel wird nun eine `hansible.conf`-Datei angelegt.
+By default listens on port `3000`.
 
-Diese kann wie folgt aussehen:
+### Projects
+
+A managemint-ready repository contains a normal Ansible project structure
+and a `managemint.conf` file (look at the `ansible-example`repo).
+
+An example `managemint.conf` could look like this:
 
 ```toml
 [run.createUsers]
@@ -57,22 +67,22 @@ file = 'pb_backups.yml'
 schedule = "mon..fri,sun /04:00"
 ```
 
-In diesem Beispiel werden zwei Runs definiert.
-Der erste mit Namen `createUsers` führt das Playbook `pb_users.yml` jeden Tag um 20:00h aus.
-`createBackups` startet `pb_backups.yml` Werktags und Sonntags alle vier Stunden.
+This example defines two Runs: `createUsers` and `runBackups`.
+The first runs the playbook `pb_users.yml` every day at 8:00PM,
+the latter runs `pb_backups.yml` every working day and sunday every four hours.
 
 ### Schedule Format
 
-Das Format ist inspiriert vom ProxMox Backup Schedule Format, siehe [ProxMox Dokumentation](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_calendar_events)
+The format was inspired by the ProxMox schedule format: [ProxMox Documentation](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_calendar_events)
 
-Grammatik siehe Quellcode. Hier ein paar Beispiele:
+The Grammar is explained in source, some Examples:
 
-| Schedule Format     | Alternativ      | Bedeutung |
+| Schedule Format     | Alternative     | Meaning |
 | --------            | --------        | -------- |
-| mon,tue,wed,thu,fri | mon..fri        | Werktags um 0:00 |
-| mon,tue,wed,sun     | mon..wed,sun    | Montags - Mittwochs und Sonntags um 0:00 |
-| 12:05               | 12:05           | Jeden Tag um 12:05 |
-| fri 12:00/20        | fri 12:00/00:20 | Freitag um 12:00, 12:20 und 12:40 |
-| 24                  | -               | 24 Minuten nach jeder vollen Stunde |
-| 14:00/02:10         | -               | ab 14:00 alle zwei Stunden und zehn Minuten bis 22:40 |
-| /5                  | 0/5             | Alle fünf Minuten |
+| mon,tue,wed,thu,fri | mon..fri        | Workdays at 0:00 |
+| mon,tue,wed,sun     | mon..wed,sun    | Monday - Thursday and Sundday at 0:00 |
+| 12:05               | 12:05           | Every day at 12:05 |
+| fri 12:00/20        | fri 12:00/00:20 | Friday at 12:00, 12:20 and 12:40 |
+| 24                  | -               | 24 minutes after every full hour |
+| 14:00/02:10         | -               | from 14:00 every two hours,until 22:40 |
+| /5                  | 0/5             | every five minutes |

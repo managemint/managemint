@@ -134,7 +134,7 @@ type ExecutorMT = RWST (ConnectionPool, RunId, Handle) () Bool
 processAnsibleEvent :: String -> String -> Callback
 processAnsibleEvent e s = case e of
         "task_runner_result" -> CallbackResult (decodeJSON s :: AnsibleRunnerResult)
-        "task_runner_start"  -> CallbackOther -- CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
+        "task_runner_start"  -> CallbackOther -- (Unused) CallbackStart  (decodeJSON s :: AnsibleRunnerStart)
         "end"                -> CallbackEnd
         _                    -> CallbackOther
 
@@ -145,7 +145,7 @@ handleCallback (CallbackResult arr) = do
             liftIO $ void $ addEvent (Event (taskARR arr) (taskIdARR arr)
                 (playARR arr) (playIdARR arr) (hostARR arr) rid (is_changed arr)
                 (is_skipped arr) (is_failed arr) (is_unreachable arr) (ignore_errors arr)
-                (is_item arr) (item arr) "Output not implemented" ) pool
+                (is_item arr) (item arr) "Output not implemented" (delegate arr) (delegate_host arr) ) pool
 handleCallback CallbackEnd = put True
 handleCallback _ = return ()
 
@@ -154,13 +154,21 @@ processAnsibleCallbacks :: IORef Bool -> ExecutorMT (LoggingT IO) ()
 processAnsibleCallbacks iorb = do
     (_, _, handle) <- ask
 
+    -- Only check IORef, when no data was recieved so we don't
+    -- terminate prematurely
+    -- TODO: refactor
     maybe
-        (liftIO $ threadDelay 10000) -- No Data was recieved
-        (\s -> handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s)
+        (do
+            liftIO $ threadDelay 10000 -- No Data was recieved
+            liftIO (readIORef iorb) >>=
+                \b -> when b $ processAnsibleCallbacks iorb
+        )
+        (\s -> do
+            handleCallback $ processAnsibleEvent (event (decodeJSON s :: AnsibleEvent)) s
+            processAnsibleCallbacks iorb
+        )
         =<< liftIO (maybeReadHandle handle)
 
-    liftIO (readIORef iorb) >>=
-        \b -> when b $ processAnsibleCallbacks iorb
 
 determineExecutorStatus :: Int -> Bool -> ExecutorStatus
 determineExecutorStatus 0 False = ExecutorInternalError
