@@ -153,14 +153,13 @@ isKey _       = False
 
 parseTomlishTree :: MonadFail m => String -> m TomlishTree
 parseTomlishTree str =
-    -- TODO: Remove only quickfix
-    case runParser (parseTop <* eof) () "" (map (\c -> if c == '\n' then ';' else c) str) of
+    case runParser (parseTop <* eof) () "" str of
       Left err -> fail $ show err
       Right t  -> buildTomlishTree t
 
 parseTomlish :: MonadFail m => (String, Int, Int) -> String -> m [Tomlish]
 parseTomlish (file, line, col) s =
-    case runParser p () "" s of
+    case runParser p () "" (map (\c -> if c == ';' then '\n' else c) s)  of
       Left err  -> fail $ show err
       Right e   -> return e
   where
@@ -175,7 +174,7 @@ parseTop :: CharParser st [Tomlish]
 parseTop = concat <$> sepEndBy parseNode (skipMany1 linebreak)
 
 linebreak :: CharParser st ()
-linebreak = spaces *> (newline <|> char ';') *> spaces
+linebreak = spaces *> newline *> spaces
 
 parseNode :: CharParser st [Tomlish]
 parseNode =  (NewSegment:) <$> brackets parsePath
@@ -186,8 +185,8 @@ parseKeyValue = KeyVal <$> (parseTomlishKey <* spaces <* char '=') <*> (spaces *
 
 parseValue :: CharParser st TomlishType
 parseValue =  TomlishInt <$> integral
-          <|> TomlishString <$> between (char '"') (char '"') (many (noneOf [';','\n','"']))
-          <|> TomlishString <$> between (char '\'') (char '\'') (many (noneOf [';','\n','\'']))
+          <|> TomlishString <$> between (char '"') (char '"') (many (noneOf ['\n','"']))
+          <|> TomlishString <$> between (char '\'') (char '\'') (many (noneOf ['\n','\'']))
           <|> TomlishAntiString <$> (char '$' *> hsVarName)
           <|> TomlishAntiInt <$> (char '€' *> hsVarName)
 
@@ -270,6 +269,7 @@ classifyBy :: (a -> a -> Bool) -> [a] -> [[a]]
 classifyBy f []     = []
 classifyBy f (x:xs) = (x : filter (f x) xs)
                     : classifyBy f (filter (not . f x) xs)
+
 -- | Decompose a list into its head and tail.
 --
 -- * If the list is empty, returns @('mempty', [])@
