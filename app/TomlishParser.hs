@@ -123,7 +123,7 @@ extractKeyVal (KeyVal k v) = return (k,v)
 extractKeyVal _ = fail "Not a key-value"
 
 -- | Classifies 'TomlishClub's by their first key.
--- Key-values always go in their own sperate class
+-- Key-values always create their own sperate class
 classifyClubs :: [TomlishClub] -> [[TomlishClub]]
 classifyClubs = classifyBy equiv
     where equiv tc tc' = fromMaybe False ((==) <$> firstKey tc <*> firstKey tc')
@@ -159,7 +159,7 @@ parseTomlishTree str =
 
 parseTomlish :: MonadFail m => (String, Int, Int) -> String -> m [Tomlish]
 parseTomlish (file, line, col) s =
-    case runParser p () "" (map (\c -> if c == ';' then '\n' else c) s)  of
+    case runParser p () "" (map (\c -> if c == ';' then '\n' else c) s) of
       Left err  -> fail $ show err
       Right e   -> return e
   where
@@ -174,14 +174,14 @@ parseTop :: CharParser st [Tomlish]
 parseTop = concat <$> sepEndBy parseNode (skipMany1 linebreak)
 
 linebreak :: CharParser st ()
-linebreak = spaces *> newline *> spaces
+linebreak = skipSpaces *> newline *> skipSpaces
 
 parseNode :: CharParser st [Tomlish]
 parseNode =  (NewSegment:) <$> brackets parsePath
          <|> (:[]) <$> parseKeyValue
 
 parseKeyValue :: CharParser st Tomlish
-parseKeyValue = KeyVal <$> (parseTomlishKey <* spaces <* char '=') <*> (spaces *> parseValue)
+parseKeyValue = KeyVal <$> (parseTomlishKey <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
 
 parseValue :: CharParser st TomlishType
 parseValue =  TomlishInt <$> integral
@@ -198,10 +198,13 @@ parseTomlishKey =  TomlishKey <$> many1 alphaNum
                <|> TomlishAntiKey <$> (char '$' *> hsVarName)
 
 brackets :: CharParser st a -> CharParser st a
-brackets = between (char '[' *> spaces) (spaces <* char ']')
+brackets = between (char '[' *> skipSpaces) (skipSpaces <* char ']')
 
 skipNewline :: CharParser st ()
 skipNewline = skipMany $ char '\n'
+
+skipSpaces :: CharParser st ()
+skipSpaces = skipMany $ char ' '
 
 hsVarName :: CharParser st String
 hsVarName = (:) <$> satisfy isLower <*> many (satisfy isAlpha)
@@ -283,9 +286,5 @@ seperateOn :: Eq a => a -> [a] -> [[a]]
 seperateOn _ [] = []
 seperateOn sep list = l : seperateOn sep (drop 1 r)
     where (l,r) = span (/= sep) list
-
-safeHead :: MonadFail m => [a] -> m a
-safeHead []    = fail "Head on empty list"
-safeHead (x:_) = return x
 
 -- \EXTRA\ --

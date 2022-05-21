@@ -18,6 +18,11 @@ import Data.Maybe (mapMaybe)
 data Tree a b = Node a [Tree a b] | Leaf b
     deriving (Show, Data)
 
+-- | Gets the first value of a tree
+getValAt :: (MonadFail m, Eq k) => [k] -> Tree k v -> m v
+getValAt k t = do
+    (Leaf v) <- safeHead . filter isLeaf =<< getLeavesAt k t
+    return v
 
 getLeavesAt :: (MonadFail m, Eq k) => [k] -> Tree k v -> m [Tree k v]
 getLeavesAt [] t = return [t]
@@ -39,3 +44,19 @@ filterAt keys tree = getLeavesAt keys tree >>= buildNode keys
     buildNode (k:ks) trees = do
         tree <- buildNode ks trees
         return $ Node k [tree]
+
+isLeaf :: Tree k v -> Bool
+isLeaf (Leaf _) = True
+isLeaf _        = False
+
+isNode :: Tree k v -> Bool
+isNode = not . isLeaf
+
+
+-- /EXTRA/ --
+
+safeHead :: MonadFail m => [a] -> m a
+safeHead []    = fail "Head on empty list"
+safeHead (x:_) = return x
+
+-- \EXTRA\ --

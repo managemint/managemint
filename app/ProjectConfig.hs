@@ -1,4 +1,4 @@
-{- app/PlaybookConfiguration.hs
+{- app/ProjectConfiguration.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
  -
@@ -53,18 +53,11 @@ extractPlaybooks tt = do
 extractData :: TomlishTree -> Either String PlaybookConfiguration
 extractData (Leaf _)    = Left "Error"
 extractData tt@(Node name _) = do
-    file <- extractString =<< getValAt [name, TomlishKey "file"] tt
-    schedule <- (extractString =<< getValAt [name, TomlishKey "schedule"] tt)
-            >>= funMaybeToRight "Failed to parse the schedule-format" parseScheduleFormat
-    name' <- extractKeyString name
-    return PlaybookConfiguration{pName=name', pFile=file, pSchedule=schedule}
-        where
-            extractString :: TomlishType -> Either String String
-            extractString (TomlishString s) = Right s
-            extractString _                 = Left "Not a TomlishString"
-            extractKeyString :: TomlishKey -> Either String String
-            extractKeyString (TomlishKey k) = Right k
-            extractKeyString _              = Left "Not a TomlishKey"
+    (TomlishString file)     <- getValAt [name, TomlishKey "file"] tt
+    (TomlishString schedule) <- getValAt [name, TomlishKey "schedule"] tt
+    schedule' <- funMaybeToRight "Failed to parse the schedule-format" parseScheduleFormat schedule
+    let (TomlishKey name') = name
+    return PlaybookConfiguration{pName=name', pFile=file, pSchedule=schedule'}
 
 writePlaybookInDatabase key p = do
     pool <- ask
