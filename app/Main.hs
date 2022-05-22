@@ -23,6 +23,7 @@ import Config
 import DatabaseUtil
 import LoggerUtil
 
+
 checkThreadOk :: (Show a, Show b) => Maybe (Either a b) -> IO Bool
 checkThreadOk (Just (Left e)) = do
     print $ "Thread Exited with Exception " ++ show e
@@ -50,3 +51,4 @@ main = do
             websv <- async $ runWebserver pool
 
             monitorStatus [sched, websv]
+

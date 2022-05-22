@@ -21,6 +21,7 @@ import Git
 import Executor
 import ScheduleFormat
 import Config
+import Extra (ifM, fst3, showT)
 
 import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
@@ -74,7 +75,6 @@ data Job = Job { _timeDue :: LocalTime
                , _repoIdentifier :: String}
 -- The key is the project path (git project name plus databse id) plus the playbook
 type Jobs = M.Map String Job
--- TODO: We probably don't want to use monad logger, and instead use the writer in the RWST stack
 type JobEnv = RWST ConnectionPool () Jobs (LoggingT IO)
 
 makeLenses ''Job
@@ -196,11 +196,12 @@ readAndParseConfigFile :: String -> FilePath -> Entity Project -> JobEnv ()
 readAndParseConfigFile oid path p = do
     pcs <- liftIO $ parseConfigFile path
     time <- liftIO getTime
-    if null pcs then lift' $ update (entityKey p) [ProjectErrorMessage =. "Error in the config file"]
-                else do
-                    keys <- mapM (writePlaybookInDatabase (entityKey p)) pcs
-                    mapM_ (\(key, job) -> at key .= Just job) $
-                        zipWith (curry (createJobsFromPlaybookConfiguration time oid path)) keys pcs
+    case pcs of
+      Left  e -> lift' $ update (entityKey p) [ProjectErrorMessage =. e]
+      Right v -> do
+          keys <- mapM (writePlaybookInDatabase (entityKey p)) v
+          mapM_ (\(key, job) -> at key .= Just job) $
+              zipWith (curry (createJobsFromPlaybookConfiguration time oid path)) keys v
 
 -- | Given an oid, path, a playbook kay and the parsed config, created a job
 createJobsFromPlaybookConfiguration :: LocalTime -> String -> String -> (Key Playbook, PlaybookConfiguration) -> (String,Job)
@@ -303,26 +304,11 @@ getTime = do
     timezone <- getCurrentTimeZone
     return $ utcToLocalTime timezone now
 
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM b t e = b >>= \b -> if b then t else e
-
--- | A total version of @tail . dropWhile (/= x)@
-after :: Eq a => a -> [a] -> [a]
-after x xs = case dropWhile (/= x) xs of
-          []  -> []
-          xs' -> tail xs'
-
-fst3 :: (a,b,c) -> a
-fst3 (a,_,_) = a
-
 logInfo :: MonadLogger m => Text -> m ()
 logInfo = logInfoNS "Scheduler"
 
 logDebug :: MonadLogger m => Text -> m ()
 logDebug = logDebugNS "Scheduler"
-
-showT :: Show a => a -> Text
-showT = pack . show
 
 lift' action = do
     pool <- ask

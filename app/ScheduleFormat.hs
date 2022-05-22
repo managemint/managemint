@@ -12,6 +12,8 @@
 
 module ScheduleFormat (Schedule (..), ScheduleTime (..), nextInstance, scheduleNext, addTimeOfDay, parseScheduleFormat) where
 
+import Extra (prependBool, iterateN, splitAtExactly)
+
 import Data.Time.Calendar.Compat (DayOfWeek (..), Day, dayOfWeek, firstDayOfWeekOnAfter, addDays)
 import Data.Time.LocalTime.Compat (TimeOfDay (..), LocalTime (..), dayFractionToTimeOfDay, midnight)
 import Data.Functor ((<&>))
@@ -199,19 +201,3 @@ firstDayOfWeekAfter :: DayOfWeek -> Day -> Day
 firstDayOfWeekAfter weekday day = firstDayOfWeekOnAfter weekday (addDays 1 day)
 
 -- \INTERPRETOR\ --
-
-
--- /MISC/ --
-
-prependBool :: Bool -> a -> [a] -> [a]
-prependBool b x xs = if b then x:xs else xs
-
-iterateN :: Int -> (a -> a) -> a -> [a]
-iterateN n f x = take n $ iterate f x
-
--- | @splitAtExactly 2 "12:00" == ("12","00")@, but @splitAtExactly 2 "1" == ("","1")@
-splitAtExactly :: Int -> [a] -> ([a],[a])
-splitAtExactly n list = if length l < n then ([], list) else (l,r)
-    where (l,r) = splitAt n list
-
--- \MISC\ --

@@ -42,6 +42,7 @@ dependencies:
 - transformers
 - template-haskell
 - syb
+- parsec
 
 executables:
   hansible-exe:

@@ -1,4 +1,3 @@
-{-# LANGUAGE QuasiQuotes, TemplateHaskell, DeriveDataTypeable #-}
 {- app/TomlishParser.hs
  -
  - Copyright (C) 2022 Jonas Gunz, Konstantin Grabmann, Paul Trojahn
@@ -9,124 +8,216 @@
  -
  -}
 
-module TomlishParser(compileTomlish, tomlish, TomlishTree, TomlishKey(TomlishKey), TomlishType(TomlishString, TomlishInt)) where
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TupleSections #-}
 
-import Parser
+module TomlishParser(TomlishTree, TomlishType(TomlishString, TomlishInt), TomlishKey(TomlishRoot, TomlishKey), tomlish, parseTomlishTree) where
 
-import Control.Applicative
+import Tree
+import Extra (classifyBy, seperateOn, safeHead)
+
 import Language.Haskell.TH
-import Language.Haskell.TH.Quote
-import Language.Haskell.TH.Syntax
-import Data.Generics
+    ( PatQ
+    , ExpQ
+    , location
+    , Loc (loc_filename, loc_start)
+    , appE
+    , conE
+    , mkName
+    , varE
+    , conP
+    , varP)
+import Language.Haskell.TH.Quote (QuasiQuoter(..), dataToPatQ, dataToExpQ)
+import Data.Generics (Data, extQ)
+import Data.Char (isLower, isAlpha, digitToInt)
+import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Foldable (fold)
+import Text.ParserCombinators.Parsec
+    ( CharParser
+    , runParser
+    , getPosition
+    , setPosition
+    , setSourceName
+    , setSourceLine
+    , setSourceColumn
+    , spaces
+    , eof
+    , skipMany1
+    , newline
+    , (<|>)
+    , char
+    , between
+    , many1
+    , noneOf
+    , alphaNum
+    , skipMany
+    , satisfy
+    , many
+    , digit
+    , space
+    , sepEndBy, sepBy1)
+import Control.Lens ((&), (%~), _1, (<&>))
+
 
 data TomlishKey = TomlishKey String
                 | TomlishAntiKey String
+                | TomlishRoot
                 deriving (Show, Data)
 
-data TomlishType= TomlishString String
-                | TomlishAntiString String
-                | TomlishInt Int
-                | TomlishAntiInt String
-                deriving (Show, Data)
+data TomlishType = TomlishString String
+                 | TomlishAntiString String
+                 | TomlishInt Int
+                 | TomlishAntiInt String
+                 deriving (Show, Data, Eq)
 
-data Tree a b   = Node a [Tree a b]
-                | Leave a b
-                deriving (Show, Data)
+data Tomlish = Key TomlishKey | KeyVal TomlishKey TomlishType | NewSegment
+    deriving (Show,Data,Eq)
 
 type TomlishTree = Tree TomlishKey TomlishType
 
-instance Lift TomlishKey where
-    lift (TomlishKey s) = appE (conE 'TomlishKey) (lift s)
-    lift (TomlishAntiKey s) = appE (conE 'TomlishKey) (unboundVarE (mkName s))
-    liftTyped = error "TomlishKey liftTyped"
+type TomlishClub = ([TomlishKey],[(TomlishKey,TomlishType)])
 
-instance Lift TomlishType where
-    lift (TomlishString s) = appE (conE 'TomlishString) (lift s)
-    lift (TomlishAntiString s) = appE (conE 'TomlishString) (unboundVarE (mkName s))
-    lift (TomlishInt i) = appE (conE 'TomlishInt) (lift i)
-    lift (TomlishAntiInt s) = appE (conE 'TomlishInt) (unboundVarE (mkName s))
-    liftTyped = error "TomlishType liftTyped"
+instance Eq TomlishKey where
+    (==) (TomlishKey s) (TomlishKey s') = s == s'
+    (==)  TomlishRoot    TomlishRoot    = True
+    (==)  _              _              = False
 
-instance (Lift a, Lift b) => Lift (Tree a b) where
-    lift (Node k v) = appE (appE (conE 'Node) (lift k)) (lift v)
-    lift (Leave k v) = appE (appE (conE 'Leave) (lift k)) (lift v)
-    liftTyped = error "Tree liftTyped"
+
+-- /TREE-BUILDING/ --
+
+buildTomlishTree :: MonadFail m => [Tomlish] -> m TomlishTree
+buildTomlishTree ts = do
+    clubs <- classifyClubs <$> createClubs ts
+    leaves <- fold <$> mapM createSubtrees clubs
+    return $ Node TomlishRoot leaves
+
+createSubtrees :: MonadFail m => [TomlishClub] -> m [TomlishTree]
+createSubtrees tcs
+    | length tcs == 1 = return $ clubToTree $ head tcs
+    | otherwise       = do
+        key <- clubHead $ head tcs
+        leaves <- fold <$> mapM createSubtrees (classifyClubs $ map clubTail tcs)
+        return [Node key leaves]
+
+clubHead :: MonadFail m => TomlishClub -> m TomlishKey
+clubHead = safeHead . fst
+
+clubTail :: TomlishClub -> TomlishClub
+clubTail c = c & _1 %~ drop 1
+
+clubToTree :: TomlishClub -> [TomlishTree]
+clubToTree ([],kv)   = map (\(k,v) -> Node k [Leaf v]) kv
+clubToTree (x:xs,kv) = [Node x $ clubToTree (xs,kv)]
+
+-- | Extracts the segments from a tomlish-list.
+-- A segment ist a list of keys (the path) with a list of key values (the leaves).
+-- It forms a list of Keys with a List of key-values at the end, thefore a club
+createClubs :: MonadFail m => [Tomlish] -> m [TomlishClub]
+createClubs = mapM createClub . seperateOn NewSegment
+
+createClub :: MonadFail m => [Tomlish] -> m TomlishClub
+createClub ts = mapM extractKeyVal vals <&> (map (\(Key k) -> k) keys,)
+    where
+        (keys,vals) = span isKey ts
+
+extractKeyVal :: MonadFail m => Tomlish -> m (TomlishKey, TomlishType)
+extractKeyVal (KeyVal k v) = return (k,v)
+extractKeyVal _ = fail "TomlishParser.extractKeyVal: Not a key-value"
+
+-- | Classifies 'TomlishClub's by their first key.
+-- Key-values always create their own sperate class
+classifyClubs :: [TomlishClub] -> [[TomlishClub]]
+classifyClubs = classifyBy equiv
+    where equiv tc tc' = fromMaybe False ((==) <$> firstKey tc <*> firstKey tc')
+          firstKey (x:_,_) = Just x
+          firstKey _       = Nothing
+
+isKeyVal :: Tomlish -> Bool
+isKeyVal (KeyVal _ _) = True
+isKeyVal _            = False
+
+isKey :: Tomlish -> Bool
+isKey (Key _) = True
+isKey _       = False
+
+-- \TREE-BUILDING\ --
 
 
 -- /PARSER/ --
 
 -- TODO: comments, support more types as values
--- <Top>     ::= <Segment> \n <Top> | <Segment> | e
--- <Segment> ::= [ <Path> ] \n <Node> | [ <Path> ]
--- <Node>    ::= <Key> = <Value> \n <Node> | <Key> = <Value>
+-- <Top>     ::= <Node> | <Node> \n <Top> | <Node> ; <Top>
+-- <Node>    ::= [ <Path> ] | <Key> = <Value>
 -- <Path>    ::= <Key>.<Path> | <Key>
 -- <Key>     ::= Alphanumeric String (No Spaces)
--- <Value>   ::= Integer Value | <Quoted String> | [ <Values> ]
--- <Values>  ::= e | <Value>, <Values>
--- <Quoted String> ::= " String ohne Quotes und Newline "
+-- <Value>   ::= Integer Value | <Quoted String>
+-- <Quoted String> ::= " String without Double Quotes or Newline " | ' String without Single Quotes or Newline '
 
-failParse :: MonadFail m => String -> m [TomlishTree]
-failParse s = case compileTomlish s of
-                Nothing -> fail "Failed to parse"
-                Just v  -> return v
+parseTomlishTree :: MonadFail m => String -> m TomlishTree
+parseTomlishTree str =
+    case runParser (parseTop <* eof) () "" str of
+      Left err -> fail $ show err
+      Right t  -> buildTomlishTree t
 
-compileTomlish :: String -> Maybe [TomlishTree]
-compileTomlish = parse parseTop
+parseTomlish :: MonadFail m => (String, Int, Int) -> String -> m [Tomlish]
+parseTomlish (file, line, col) s =
+    case runParser p () "" (map (\c -> if c == ';' then '\n' else c) s) of
+      Left err  -> fail $ show err
+      Right e   -> return e
+  where
+    p = do pos <- getPosition
+           setPosition $ (`setSourceName` file) $ (`setSourceLine` line) $ setSourceColumn pos col
+           spaces
+           e <- parseTop
+           eof
+           return e
 
-compile :: String -> [TomlishTree]
-compile s = case compileTomlish s of
-              Nothing -> error "parse error"
-              Just v  -> v
+parseTop :: CharParser st [Tomlish]
+parseTop = concat <$> sepEndBy parseNode (skipMany1 linebreak)
 
-addLeavesLinear :: TomlishTree -> [TomlishTree] -> TomlishTree
-addLeavesLinear (Node k []) b = Node k b
-addLeavesLinear (Node k [t]) b = Node k [addLeavesLinear t b]
-addLeavesLinear _ _ = error "addLeavesLinear undefined behaviour"
+linebreak :: CharParser st ()
+linebreak = skipSpaces *> newline *> skipSpaces
 
-parseTop :: Parser [TomlishTree]
-parseTop =  (:[]) <$> parseSegment <* skipNewline
-        <|> (:) <$> (parseSegment <* skipNewline <* lineSeperator) <*> parseTop
+parseNode :: CharParser st [Tomlish]
+parseNode =  (NewSegment:) <$> brackets parsePath
+         <|> (:[]) <$> parseKeyValue
 
-parseSegmentTop :: Parser TomlishTree
-parseSegmentTop =  char '[' *> skipSpaces *> parsePath <* skipSpaces <* char ']'
+parseKeyValue :: CharParser st Tomlish
+parseKeyValue = KeyVal <$> (parseTomlishKey <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
 
-parseSegment :: Parser TomlishTree
-parseSegment =  parseSegmentTop
-            <|> addLeavesLinear <$> (parseSegmentTop <* skipNewline <* lineSeperator) <*> parseNode
-
-parseNode :: Parser [TomlishTree]
-parseNode =  (:[]) <$> parseKeyValue
-         <|> (:) <$> (parseKeyValue <* skipNewline <* lineSeperator) <*> parseNode
-
-parsePath :: Parser TomlishTree
-parsePath =  parseKey
-         <|> (\s t -> Node s [t]) <$> parseTomlishKey <* char '.' <*> parsePath
-
-parseKey :: Parser TomlishTree
-parseKey =  (`Node` []) <$> parseTomlishKey
-
-parseKeyValue :: Parser TomlishTree
-parseKeyValue =  Leave <$> (parseTomlishKey <* skipSpaces <* char '=') <*> (skipSpaces *> parseValue)
-
-parseTomlishKey :: Parser TomlishKey
-parseTomlishKey =  TomlishKey <$> alphaNum
-               <|> TomlishAntiKey <$> (char '$' *> hsVarName)
-
-parseValue :: Parser TomlishType
-parseValue = TomlishInt <$> integral
-          <|> TomlishString <$> (char '"' *> line '"' <* char '"')
-          <|> TomlishString <$> (char '\'' *> line '\''<* char '\'')
+parseValue :: CharParser st TomlishType
+parseValue =  TomlishInt <$> integral
+          <|> TomlishString <$> between (char '"') (char '"') (many (noneOf ['\n','"']))
+          <|> TomlishString <$> between (char '\'') (char '\'') (many (noneOf ['\n','\'']))
           <|> TomlishAntiString <$> (char '$' *> hsVarName)
           <|> TomlishAntiInt <$> (char '€' *> hsVarName)
 
-skipNewline :: Parser ()
-skipNewline = () <$ many (char '\n' <|> space)
+parsePath :: CharParser st [Tomlish]
+parsePath = map Key <$> sepBy1 parseTomlishKey (char '.')
 
-line :: Char -> Parser String
-line c = many $ notChars (c:"\n;")
+parseTomlishKey :: CharParser st TomlishKey
+parseTomlishKey =  TomlishKey <$> many1 alphaNum
+               <|> TomlishAntiKey <$> (char '$' *> hsVarName)
 
-lineSeperator :: Parser Char
-lineSeperator = char '\n' <|> char ';'
+brackets :: CharParser st a -> CharParser st a
+brackets = between (char '[' *> skipSpaces) (skipSpaces <* char ']')
+
+skipNewline :: CharParser st ()
+skipNewline = skipMany $ char '\n'
+
+skipSpaces :: CharParser st ()
+skipSpaces = skipMany $ char ' '
+
+hsVarName :: CharParser st String
+hsVarName = (:) <$> satisfy isLower <*> many (satisfy isAlpha)
+
+integral :: CharParser st Int
+integral =  natural
+        <|> negate <$> (char '-' *> natural)
+
+natural :: CharParser st Int
+natural = accum <$> many1 (digitToInt <$> digit)
+    where accum = foldl (\d n-> n + d*10) 0
 
 -- \PARSER\ --
 
@@ -134,21 +225,44 @@ lineSeperator = char '\n' <|> char ';'
 -- /QUASI-QUOTER/-
 
 tomlish :: QuasiQuoter
-tomlish =  QuasiQuoter { quoteExp  = lift . compile
-                       , quotePat  = \s -> do {tree <- failParse s; dataToPatQ (const Nothing `extQ` antiTomlishKeyPat `extQ` antiTomlishTypePat) tree}
-                       , quoteType = error "tomlish"
-                       , quoteDec  = error "tomlish"
+tomlish =  QuasiQuoter { quoteExp  = quoteTomlishTreeExp
+                       , quotePat  = quoteTomlishTreePat
+                       , quoteType = const $ fail "Quasi-quoter for types not implemented"
+                       , quoteDec  = const $ fail "Quasi-quoter for declarations not implemented"
                        }
 
--- This is based on exercise sheet 11 and the example to QuasiQuoters given on the Haskell wiki https://wiki.haskell.org/Quasiquotation
+quoteTomlishTreeExp :: String -> ExpQ
+quoteTomlishTreeExp s = do loc <- location
+                           let pos = ( loc_filename loc
+                                     , fst (loc_start loc)
+                                     , snd (loc_start loc))
+                           tomli <- buildTomlishTree =<< parseTomlish pos s
+                           dataToExpQ (const Nothing `extQ` antiTomlishTypeExp `extQ` antiTomlishKeyExp) tomli
 
-antiTomlishKeyPat :: TomlishKey -> Maybe PatQ
-antiTomlishKeyPat (TomlishAntiKey v) = Just $ conP (mkName "TomlishKey") [varP (mkName v)]
-antiTomlishKeyPat _ = Nothing
+antiTomlishTypeExp :: TomlishType -> Maybe ExpQ
+antiTomlishTypeExp (TomlishAntiString s) = Just $ appE (conE (mkName "TomlishString")) (varE (mkName s))
+antiTomlishTypeExp (TomlishAntiInt s)    = Just $ appE (conE (mkName "TomlishInt"))    (varE (mkName s))
+antiTomlishTypeExp _ = Nothing
+
+antiTomlishKeyExp :: TomlishKey -> Maybe ExpQ
+antiTomlishKeyExp (TomlishAntiKey s) = Just $ appE (conE (mkName "TomlishKey")) (varE (mkName s))
+antiTomlishKeyExp _ = Nothing
+
+quoteTomlishTreePat :: String -> PatQ
+quoteTomlishTreePat s = do loc <- location
+                           let pos = ( loc_filename loc
+                                     , fst (loc_start loc)
+                                     , snd (loc_start loc))
+                           tomli <- buildTomlishTree =<< parseTomlish pos s
+                           dataToPatQ (const Nothing `extQ` antiTomlishTypePat `extQ` antiTomlishKeyPat) tomli
 
 antiTomlishTypePat :: TomlishType -> Maybe PatQ
-antiTomlishTypePat (TomlishAntiInt s) = Just $ conP (mkName "TomlishInt") [varP (mkName s)]
 antiTomlishTypePat (TomlishAntiString s) = Just $ conP (mkName "TomlishString") [varP (mkName s)]
+antiTomlishTypePat (TomlishAntiInt s)    = Just $ conP (mkName "TomlishInt")    [varP (mkName s)]
 antiTomlishTypePat _ = Nothing
+
+antiTomlishKeyPat :: TomlishKey -> Maybe PatQ
+antiTomlishKeyPat (TomlishAntiKey s) = Just $ conP (mkName "TomlishKey") [varP (mkName s)]
+antiTomlishKeyPat _ = Nothing
 
 -- \QUASI-QUOTER\ --
