@@ -21,12 +21,12 @@ import Parser
 import TomlishParser
 import Tree (getLeavesAt, getValAt, Tree(Node, Leaf))
 import Config
+import Extra (mapLeft, funMaybeToRight)
 
 import Database.Persist.MySQL (runSqlPool, insert, update, entityKey, entityVal, (=.))
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.RWS (ask)
 import Control.Exception (try)
-import Data.Bifunctor (Bifunctor(first))
 
 instance MonadFail (Either String) where
     fail = Left
@@ -51,12 +51,13 @@ extractPlaybooks tt = do
     mapM extractData trees
 
 extractData :: TomlishTree -> Either String PlaybookConfiguration
-extractData (Leaf _)    = Left "Error"
+extractData (Leaf _)         = Left "Did not find necessary entires in the config file"
 extractData tt@(Node name _) = do
     (TomlishString file)     <- getValAt [name, TomlishKey "file"] tt
     (TomlishString schedule) <- getValAt [name, TomlishKey "schedule"] tt
     schedule' <- funMaybeToRight "Failed to parse the schedule-format" parseScheduleFormat schedule
-    let (TomlishKey name') = name
+    -- This way failed pattern matching won't throw an exception and use Monad Fail instead
+    (TomlishKey name') <- return name
     return PlaybookConfiguration{pName=name', pFile=file, pSchedule=schedule'}
 
 writePlaybookInDatabase key p = do
@@ -66,13 +67,3 @@ writePlaybookInDatabase key p = do
       case filter ((==) (pName p) . playbookPlaybookName . entityVal) playbooks of
         []     -> insert $ Playbook key (pFile p) (pName p)
         (p':_) -> update (entityKey p') [PlaybookFile =. pFile p] >> return (entityKey p')
-
-mapLeft :: (a -> c) -> Either a b -> Either c b
-mapLeft = first
-
-funMaybeToRight :: a -> (b -> Maybe c) -> b -> Either a c
-funMaybeToRight d f x = maybeToRight d $ f x
-
-maybeToRight :: b -> Maybe a -> Either b a
-maybeToRight l Nothing  = Left l
-maybeToRight _ (Just v) = Right v

@@ -21,6 +21,7 @@ import Git
 import Executor
 import ScheduleFormat
 import Config
+import Extra (ifM, fst3, showT)
 
 import Data.Char (isAlphaNum)
 import Data.Time.LocalTime.Compat (LocalTime, TimeOfDay (..), getCurrentTimeZone, utcToLocalTime)
@@ -303,26 +304,11 @@ getTime = do
     timezone <- getCurrentTimeZone
     return $ utcToLocalTime timezone now
 
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM b t e = b >>= \b -> if b then t else e
-
--- | A total version of @tail . dropWhile (/= x)@
-after :: Eq a => a -> [a] -> [a]
-after x xs = case dropWhile (/= x) xs of
-          []  -> []
-          xs' -> tail xs'
-
-fst3 :: (a,b,c) -> a
-fst3 (a,_,_) = a
-
 logInfo :: MonadLogger m => Text -> m ()
 logInfo = logInfoNS "Scheduler"
 
 logDebug :: MonadLogger m => Text -> m ()
 logDebug = logDebugNS "Scheduler"
-
-showT :: Show a => a -> Text
-showT = pack . show
 
 lift' action = do
     pool <- ask

@@ -14,6 +14,8 @@
 module TomlishParser(TomlishTree, TomlishType(TomlishString, TomlishInt), TomlishKey(TomlishRoot, TomlishKey), tomlish, parseTomlishTree) where
 
 import Tree
+import Extra (classifyBy, seperateOn, safeHead)
+
 import Language.Haskell.TH
     ( PatQ
     , ExpQ
@@ -120,7 +122,7 @@ createClub ts = mapM extractKeyVal vals <&> (map (\(Key k) -> k) keys,)
 
 extractKeyVal :: MonadFail m => Tomlish -> m (TomlishKey, TomlishType)
 extractKeyVal (KeyVal k v) = return (k,v)
-extractKeyVal _ = fail "Not a key-value"
+extractKeyVal _ = fail "TomlishParser.extractKeyVal: Not a key-value"
 
 -- | Classifies 'TomlishClub's by their first key.
 -- Key-values always create their own sperate class
@@ -264,27 +266,3 @@ antiTomlishKeyPat (TomlishAntiKey s) = Just $ conP (mkName "TomlishKey") [varP (
 antiTomlishKeyPat _ = Nothing
 
 -- \QUASI-QUOTER\ --
-
-
--- /EXTRA/ --
-
-classifyBy :: (a -> a -> Bool) -> [a] -> [[a]]
-classifyBy f []     = []
-classifyBy f (x:xs) = (x : filter (f x) xs)
-                    : classifyBy f (filter (not . f x) xs)
-
--- | Decompose a list into its head and tail.
---
--- * If the list is empty, returns @('mempty', [])@
--- * If the list is non-empty, returns @(x, xs)@,
--- where @x@ is the head of the list and @xs@ its tail.
-uncons :: Monoid a => [a] -> (a,[a])
-uncons []     = (mempty,[])
-uncons (x:xs) = (x,xs)
-
-seperateOn :: Eq a => a -> [a] -> [[a]]
-seperateOn _ [] = []
-seperateOn sep list = l : seperateOn sep (drop 1 r)
-    where (l,r) = span (/= sep) list
-
--- \EXTRA\ --
