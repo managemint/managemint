@@ -5,7 +5,7 @@
 managemint is a purpose-built CI for ansible.
 It aims to give users a better insight of the state of their Playbook runs.
 
-managemint is in early developement and not yet stable.
+managemint is in early development and not yet stable.
 
 ## Usage
 
@@ -36,14 +36,14 @@ Tested versions:
 
 ### Setup
 
-This is an experimental developement setup only.
+This is an experimental development setup only.
 
-managemint depends on a python-package and a Ansible-Galaxy colection,
+managemint depends on a python-package and a Ansible-Galaxy collection,
 `manageint_glue` and `managemint_modules`.
 
 Install them with running `pip install .` and `ansible-galaxy collection install .`
 in the respective source folders.
-A virtaulenv for python packages is refcommended.
+A virtaulenv for python packages is recommended.
 
 A MySQL Database (tested with MariaDB 10.5) is required to run managemint.
 Connection parameters are hardcoded in `app/Config.hs` for now.
@@ -53,7 +53,7 @@ By default listens on port `3000`.
 ### Projects
 
 A managemint-ready repository contains a normal Ansible project structure
-and a `managemint.conf` file (look at the `ansible-example`repo).
+and a `managemint.conf` file (look at the `ansible-example` repo).
 
 An example `managemint.conf` could look like this:
 
@@ -69,18 +69,18 @@ schedule = "mon..fri,sun /04:00"
 
 This example defines two Runs: `createUsers` and `runBackups`.
 The first runs the playbook `pb_users.yml` every day at 8:00PM,
-the latter runs `pb_backups.yml` every working day and sunday every four hours.
+the latter runs `pb_backups.yml` every working day and Sunday every four hours.
 
 ### Schedule Format
 
 The format was inspired by the ProxMox schedule format: [ProxMox Documentation](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#chapter_calendar_events)
 
-The Grammar is explained in source, some Examples:
+The Grammar is explained in the source code, some Examples:
 
 | Schedule Format     | Alternative     | Meaning |
 | --------            | --------        | -------- |
 | mon,tue,wed,thu,fri | mon..fri        | Workdays at 0:00 |
-| mon,tue,wed,sun     | mon..wed,sun    | Monday - Thursday and Sundday at 0:00 |
+| mon,tue,wed,sun     | mon..wed,sun    | Monday - Thursday and Sunday at 0:00 |
 | 12:05               | 12:05           | Every day at 12:05 |
 | fri 12:00/20        | fri 12:00/00:20 | Friday at 12:00, 12:20 and 12:40 |
 | 24                  | -               | 24 minutes after every full hour |
