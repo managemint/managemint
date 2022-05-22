@@ -57,7 +57,7 @@ scheduleNext = Schedule{_scheduleDay=fullWeek, _scheduleTime=Just ScheduleTime{_
 -- <Top>      ::= <Weekdays> | <Weeksdays> _ <Times> | <Times>
 -- <Weekdays> ::= <List(Enum(Day))>
 -- <List(A)>  ::= A | A , <List(A)>
--- <Enum(A)>  ::= <A> .. <Enum(A)> | <A>
+-- <Enum(A)>  ::= <A> .. <A> | <A>
 -- <Day>      ::= mon | tue | wed | thu | fri | sat | sun
 -- <Times>    ::= <List(Time0)> | / <List(Time1)> | <List(Time0)> / <List(Time1)>
 -- <Time1>    ::= <Hour> : <Min> | <Min1>
