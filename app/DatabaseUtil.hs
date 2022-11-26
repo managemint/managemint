@@ -94,10 +94,3 @@ addEvent :: Event -> ConnectionPool -> IO (Key Event)
 addEvent event = runSqlPool (insert event)
 
 data Hansible = Hansible{ connections :: ConnectionPool, getStatic :: Static }
-
-connectionInfo :: ConnectInfo
-connectionInfo = defaultConnectInfo { connectHost     = databaseUtilConnectHost
-                                    , connectUser     = databaseUtilConnectUser
-                                    , connectPassword = databaseUtilConnectPassword
-                                    , connectDatabase = databaseUtilConnectDatabase
-                                    }

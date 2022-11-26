@@ -27,11 +27,8 @@ schedulerRepoRoot = "." :: FilePath
 
 projectConfigFile = "managemint.conf"
 
-executorSockPath = "/tmp/managemint.sock"
+executorSockPath = "/tmp/managemint3.sock"
 
-webserverPort = 3000 :: Int
+webserverPort = 3002 :: Int
 
-databaseUtilConnectHost     = "mdbtest-11.my.cum.re"
-databaseUtilConnectUser     = "hansible"
-databaseUtilConnectPassword = "AffqDbF2Vw5Aq7EHferw"
-databaseUtilConnectDatabase = "hansible"
+mainConfigFile = "./managemint.conf"

@@ -46,7 +46,8 @@ in the respective source folders.
 A virtaulenv for python packages is recommended.
 
 A MySQL Database (tested with MariaDB 10.5) is required to run managemint.
-Connection parameters are hardcoded in `app/Config.hs` for now.
+Connection parameters are set in `managemint.conf`.
+See `managemint.conf.example` for details.
 
 By default listens on port `3000`.
 

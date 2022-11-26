@@ -7,8 +7,7 @@
  - published by the Free Software Foundation.
  -
  -}
-
-import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration)
+import Database.Persist.MySQL (withMySQLPool, runSqlPersistMPool, runMigration, ConnectInfo (..), defaultConnectInfo)
 
 import Control.Monad (when)
 import Control.Concurrent (threadDelay)
@@ -22,6 +21,10 @@ import Scheduler
 import Config
 import DatabaseUtil
 import LoggerUtil
+
+--
+import TomlishParser
+import Tree
 
 
 checkThreadOk :: (Show a, Show b) => Maybe (Either a b) -> IO Bool
@@ -40,10 +43,22 @@ monitorStatus as = do
     threadDelay 1000000
     (mapM checkThreadOk =<< mapM poll as) >>= (`when` monitorStatus as) . and
 
+extractConnectionInfo :: TomlishTree -> IO ConnectInfo
+extractConnectionInfo tt = do
+    (TomlishString host) <- getValAt [TomlishRoot, TomlishKey "database", TomlishKey "host"] tt
+    (TomlishString database) <- getValAt [TomlishRoot, TomlishKey "database", TomlishKey "database"] tt
+    (TomlishString user) <- getValAt [TomlishRoot, TomlishKey "database", TomlishKey "user"] tt
+    (TomlishString password) <- getValAt [TomlishRoot, TomlishKey "database", TomlishKey "password"] tt
+    return defaultConnectInfo { connectHost = host
+                       , connectUser     = user
+                       , connectPassword = password
+                       , connectDatabase = database
+                       }
 
 main :: IO ()
 main = do
-    runHansibleLogger $ withMySQLPool connectionInfo 10 $ \pool -> do
+    ci <- readFile mainConfigFile >>= parseTomlishTree >>= extractConnectionInfo
+    runHansibleLogger $ withMySQLPool ci 10 $ \pool -> do
         logger <- getCurrentLogger
         liftIO $ do
             runSqlPersistMPool (runMigration migrateAll) pool

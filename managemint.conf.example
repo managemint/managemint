@@ -1,0 +1,5 @@
+[database]
+host     = "mysql"
+database = "hansible"
+user     = "hansible"
+password = "supersecret"
