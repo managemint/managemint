@@ -78,12 +78,12 @@ The format was inspired by the ProxMox schedule format: [ProxMox Documentation](
 
 The Grammar is explained in the source code, some Examples:
 
-| Schedule Format     | Alternative     | Meaning |
-| --------            | --------        | -------- |
-| mon,tue,wed,thu,fri | mon..fri        | Workdays at 0:00 |
-| mon,tue,wed,sun     | mon..wed,sun    | Monday - Thursday and Sunday at 0:00 |
-| 12:05               | 12:05           | Every day at 12:05 |
-| fri 12:00/20        | fri 12:00/00:20 | Friday at 12:00, 12:20 and 12:40 |
-| 24                  | -               | 24 minutes after every full hour |
-| 14:00/02:10         | -               | from 14:00 every two hours,until 22:40 |
-| /5                  | 0/5             | every five minutes |
+| Schedule Format     | Alternative     | Meaning                                                 |
+| --------            | --------        | --------                                                |
+| mon,tue,wed,thu,fri | mon..fri        | Workdays at 0:00                                        |
+| mon,tue,wed,sun     | mon..wed,sun    | Monday to Wednesday and Sunday at 0:00                  |
+| 12:05               | -               | Every day at 12:05                                      |
+| fri 12:00/20        | fri 12:00/00:20 | Friday at 12:00, 12:20 and 12:40                        |
+| 24                  | -               | 24 minutes after every full hour                        |
+| 14:00/02:10         | -               | from 14:00 every two hours and ten mintues, until 22:40 |
+| /5                  | 0/5             | every five minutes                                      |
